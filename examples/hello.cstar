@@ -1,2 +1,8 @@
-let x = 5
-print(x)
+func add
+    let x = 5
+    return x
+
+if x
+    print(x)
+else
+    print(0)

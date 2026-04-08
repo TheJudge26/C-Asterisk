@@ -25,6 +25,9 @@ def main():
     lexer = Lexer(source_code)
     tokens = lexer.tokenize()
 
+    for token in tokens:
+        print(token)
+
     #parser
     print("2. Parsing...")
     parser = Parser(tokens)
