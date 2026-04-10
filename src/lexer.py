@@ -22,7 +22,7 @@ class Lexer:
         if self.position >= len(self.text):
             self.current_char = None
         else:
-            self.current_char = self.text[self.position]
+            self.current_char = self.text[self.position] //D
 
     def skip_whitespace(self):
         while self.current_char is not None and self.current_char.isspace():
