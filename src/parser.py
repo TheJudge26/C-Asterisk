@@ -260,9 +260,9 @@ class Parser:
 
         return statements
 
-    # -------------------------
+   
     # EXPRESSIONS
-    # -------------------------
+  
     def expression(self):
         return self.comparison()
 
