@@ -22,7 +22,7 @@ class Lexer:
         if self.position >= len(self.text):
             self.current_char = None
         else:
-            self.current_char = self.text[self.position] //D
+            self.current_char = self.text[self.position]
 
     def skip_whitespace(self):
         while self.current_char is not None and self.current_char.isspace():
@@ -47,7 +47,7 @@ class Lexer:
             self.advance()
         
         if result in KEYWORDS:
-            return Token(KEYWORDS[result])
+            return Token(KEYWORDS[result], result)
         
         return Token(TokenType.IDENTIFIER, result)
     
@@ -100,6 +100,14 @@ class Lexer:
             if self.current_char == ")":
                 self.advance()
                 return Token(TokenType.RPAREN)
+            
+            if self.current_char == "{":
+                self.advance()
+                return Token(TokenType.LBRACE)
+
+            if self.current_char == "}":
+                self.advance()
+                return Token(TokenType.RBRACE)
             
             raise Exception(f"Illegal Character: {self.current_char}")
 

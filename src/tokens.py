@@ -13,6 +13,8 @@ class TokenType(Enum):
     LESS = "<"
     LPAREN = "("
     RPAREN = ")"
+    LBRACE = "{"
+    RBRACE = "}"
     PRINT = "PRINT"
     IF = "IF"
     ELSE = "ELSE"

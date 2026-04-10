@@ -1,14 +1,27 @@
-func add
-    let x = 5
-    return x
+let x = 5
 
-if x
-    print(x)
-else
-    print(0)
-
-let abc123 = 5
-let x = 1231255412
-
-print(abc123)
 print(x)
+
+y = 10
+
+print(y)
+
+z = 5 + 3 * 2
+
+print(z)
+
+a = 10
+
+if a > 5 {
+    print(a)
+}
+
+b = 2
+
+while b < 10 {
+    b = b + 1
+}
+
+func test {
+    return 5
+}

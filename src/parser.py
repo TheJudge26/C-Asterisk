@@ -1,55 +1,75 @@
 from tokens import TokenType
 
+
+# -------------------------
+# AST BASE
+# -------------------------
+class AST:
+    pass
+
+
 # -------------------------
 # AST NODES
 # -------------------------
-class Number:
+class Number(AST):
     def __init__(self, value):
         self.value = value
 
 
-class Variable:
+class Variable(AST):
     def __init__(self, name):
         self.name = name
 
 
-class BinaryOp:
+class BinaryOp(AST):
     def __init__(self, left, op, right):
         self.left = left
         self.op = op
         self.right = right
 
 
-class VarDecl:
+class VarDecl(AST):
     def __init__(self, name, value):
         self.name = name
         self.value = value
 
 
-class Print:
+class Assignment(AST):
+    def __init__(self, name, value):
+        self.name = name
+        self.value = value
+
+
+class Print(AST):
     def __init__(self, value):
         self.value = value
 
 
-class If:
+class If(AST):
     def __init__(self, condition, body, else_body=None):
         self.condition = condition
         self.body = body
         self.else_body = else_body
 
 
-class While:
+class While(AST):
     def __init__(self, condition, body):
         self.condition = condition
         self.body = body
 
 
-class Return:
+class Return(AST):
     def __init__(self, value):
         self.value = value
 
 
-class Program:
+class Function(AST):
+    def __init__(self, name, body):
+        self.name = name
+        self.body = body
+
+
+class Program(AST):
     def __init__(self, statements):
         self.statements = statements
 
@@ -70,6 +90,13 @@ class Parser:
         self.pos += 1
         if self.pos < len(self.tokens):
             self.current = self.tokens[self.pos]
+        else:
+            self.current = self.tokens[-1]
+
+    def peek(self):
+        if self.pos + 1 < len(self.tokens):
+            return self.tokens[self.pos + 1]
+        return None
 
     def eat(self, token_type):
         if self.current.type == token_type:
@@ -86,7 +113,8 @@ class Parser:
         statements = []
 
         while self.current.type != TokenType.EOF:
-            statements.append(self.statement())
+            stmt = self.statement()
+            statements.append(stmt)
 
         return Program(statements)
 
@@ -109,8 +137,44 @@ class Parser:
         elif self.current.type == TokenType.RETURN:
             return self.return_stmt()
 
+        elif self.current.type == TokenType.FUNC:
+            return self.function_decl()
+
+        elif (
+            self.current.type == TokenType.IDENTIFIER
+            and self.peek()
+            and self.peek().type == TokenType.EQUAL
+        ):
+            return self.assignment()
+
         else:
             raise Exception(f"Unexpected statement: {self.current.type}")
+
+    # -------------------------
+    # FUNCTION
+    # -------------------------
+    def function_decl(self):
+        self.eat(TokenType.FUNC)
+
+        name = self.current.value
+        self.eat(TokenType.IDENTIFIER)
+
+        body = self.block()
+
+        return Function(name, body)
+
+    # -------------------------
+    # ASSIGNMENT
+    # -------------------------
+    def assignment(self):
+        name = self.current.value
+        self.eat(TokenType.IDENTIFIER)
+
+        self.eat(TokenType.EQUAL)
+
+        value = self.expression()
+
+        return Assignment(name, value)
 
     # -------------------------
     # let x = expr
@@ -179,15 +243,20 @@ class Parser:
         return Return(value)
 
     # -------------------------
-    # BLOCK (simple version)
+    # BLOCK
     # -------------------------
     def block(self):
         statements = []
 
-        # for now: single statement block
-        # (you can upgrade later to { } blocks)
+        self.eat(TokenType.LBRACE)
 
-        statements.append(self.statement())
+        while (
+            self.current.type != TokenType.RBRACE
+            and self.current.type != TokenType.EOF
+        ):
+            statements.append(self.statement())
+
+        self.eat(TokenType.RBRACE)
 
         return statements
 

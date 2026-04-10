@@ -28,10 +28,15 @@ def main():
     for token in tokens:
         print(token)
 
-    #parser
+    # parser
     print("2. Parsing...")
-    parser = Parser(tokens)
-    ast = parser.parse()
+    try:
+        parser = Parser(tokens)
+        ast = parser.parse()
+        print("AST Generated Successfully")
+    except Exception as e:
+        print(f"Parser Error: {e}")
+    sys.exit(1)
 
     #Semantic Analysis
     print("3. Semantic Analysis...")
