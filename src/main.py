@@ -6,7 +6,7 @@ from codegen import LLVMCodeGenerator
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python src/main.py <file.cstar>")
+        print("Usage: python src/main.py <file.cast>")
         sys.exit(1)
 
     file_path = sys.argv[1]
@@ -24,9 +24,7 @@ def main():
     print("1. Lexing...")
     lexer = Lexer(source_code)
     tokens = lexer.tokenize()
-
-    for token in tokens:
-        print(token)
+    print("\n".join(str(token) for token in tokens))
 
     # parser
     print("2. Parsing...")
@@ -36,7 +34,7 @@ def main():
         print("AST Generated Successfully")
     except Exception as e:
         print(f"Parser Error: {e}")
-    sys.exit(1)
+        sys.exit(1)
 
     #Semantic Analysis
     print("3. Semantic Analysis...")
@@ -47,7 +45,12 @@ def main():
     print("4. Generating LLVM IR...")
     codegen = LLVMCodeGenerator()
     codegen.generate(ast)
-    
+
+    # Output the LLVM IR
+    print("\n--- Generated LLVM IR ---")
+    print(codegen.get_ir())
+    print("--- End LLVM IR ---\n")
+
     print("Success! (Pipeline is completely wired up)")
 
 if __name__ == "__main__":

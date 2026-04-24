@@ -53,6 +53,12 @@ class Return(AST):
     def __init__(self, value):
         self.value = value
 
+# NEW: For function calls like calculate()
+class Call(AST):
+    def __init__(self, name, args):
+        self.name = name
+        self.args = args
+
 # UPDATED: Added return_type
 class Function(AST):
     def __init__(self, name, body, return_type=None):
@@ -81,19 +87,26 @@ class Program(AST):
 class Parser:
     def __init__(self, tokens):
         self.tokens = tokens
+        self.tokens_len = len(tokens)
         self.pos = 0
         self.current = tokens[self.pos]
 
     def advance(self):
         self.pos += 1
-        if self.pos < len(self.tokens):
+        if self.pos < self.tokens_len:
             self.current = self.tokens[self.pos]
         else:
             self.current = self.tokens[-1]
 
     def peek(self):
-        if self.pos + 1 < len(self.tokens):
+        if self.pos + 1 < self.tokens_len:
             return self.tokens[self.pos + 1]
+        return None
+
+    def next_token_type(self):
+        next_pos = self.pos + 1
+        if next_pos < self.tokens_len:
+            return self.tokens[next_pos].type
         return None
 
     def eat(self, token_type):
@@ -104,24 +117,26 @@ class Parser:
 
     def parse(self):
         statements = []
+        append_statement = statements.append
         while self.current.type != TokenType.EOF:
-            statements.append(self.statement())
+            append_statement(self.statement())
         return Program(statements)
 
     def statement(self):
-        if self.current.type == TokenType.LET:
+        current_type = self.current.type
+        if current_type == TokenType.LET:
             return self.var_decl()
-        elif self.current.type == TokenType.PRINT:
+        elif current_type == TokenType.PRINT:
             return self.print_stmt()
-        elif self.current.type == TokenType.IF:
+        elif current_type == TokenType.IF:
             return self.if_stmt()
-        elif self.current.type == TokenType.WHILE:
+        elif current_type == TokenType.WHILE:
             return self.while_stmt()
-        elif self.current.type == TokenType.RETURN:
+        elif current_type == TokenType.RETURN:
             return self.return_stmt()
-        elif self.current.type == TokenType.FUNC:
+        elif current_type == TokenType.FUNC:
             return self.function_decl()
-        elif self.current.type == TokenType.IDENTIFIER and self.peek() and self.peek().type == TokenType.EQUAL:
+        elif current_type == TokenType.IDENTIFIER and self.next_token_type() == TokenType.EQUAL:
             return self.assignment()
         else:
             raise Exception(f"Unexpected statement: {self.current.type}")
@@ -194,14 +209,18 @@ class Parser:
 
     def return_stmt(self):
         self.eat(TokenType.RETURN)
+        # Check if there's an expression or just semicolon
+        if self.current.type in (TokenType.RBRACE, TokenType.EOF):
+            return Return(None)
         value = self.expression()
         return Return(value)
 
     def block(self):
         statements = []
+        append_statement = statements.append
         self.eat(TokenType.LBRACE)
         while self.current.type != TokenType.RBRACE and self.current.type != TokenType.EOF:
-            statements.append(self.statement())
+            append_statement(self.statement())
         self.eat(TokenType.RBRACE)
         return statements
 
@@ -253,14 +272,26 @@ class Parser:
         elif token.type == TokenType.IDENTIFIER:
             name = token.value
             self.eat(TokenType.IDENTIFIER)
-            
+
+            # Is it a function call? e.g. calculate()
+            if self.current.type == TokenType.LPAREN:
+                self.eat(TokenType.LPAREN)
+                args = []
+                if self.current.type != TokenType.RPAREN:
+                    args.append(self.expression())
+                    while self.current.type == TokenType.COMMA:
+                        self.eat(TokenType.COMMA)
+                        args.append(self.expression())
+                self.eat(TokenType.RPAREN)
+                return Call(name, args)
+
             # Is it an array index? e.g. weights[i]
             if self.current.type == TokenType.LBRACKET:
                 self.eat(TokenType.LBRACKET)
                 index = self.expression()
                 self.eat(TokenType.RBRACKET)
                 return ArrayIndex(name, index)
-                
+
             return Variable(name)
 
         elif token.type == TokenType.LPAREN:

@@ -1,0 +1,3 @@
+let x: int = 5
+let y: int = nonexistent()
+print(x)

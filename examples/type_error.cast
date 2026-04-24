@@ -1,0 +1,20 @@
+func get_value -> int {
+    return 42
+}
+
+func bad_function -> void {
+    let result: int = get_value()
+    let unused: int = 100
+}
+
+let x: int = 5
+let y: int = 10
+
+while x < y {
+    x = x + 1
+}
+
+let arr: [int] = [1, 2, 3]
+let elem: int = arr[0]
+
+print(x)
