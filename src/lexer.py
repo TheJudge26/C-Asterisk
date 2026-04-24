@@ -10,16 +10,34 @@ KEYWORDS = {
     "return": TokenType.RETURN
 }
 
+SINGLE_CHAR_TOKENS = {
+    "+": TokenType.PLUS,
+    "*": TokenType.MULTIPLY,
+    "/": TokenType.DIVIDE,
+    "=": TokenType.EQUAL,
+    ">": TokenType.GREATER,
+    "<": TokenType.LESS,
+    "(": TokenType.LPAREN,
+    ")": TokenType.RPAREN,
+    "{": TokenType.LBRACE,
+    "}": TokenType.RBRACE,
+    ":": TokenType.COLON,
+    ",": TokenType.COMMA,
+    "[": TokenType.LBRACKET,
+    "]": TokenType.RBRACKET,
+}
+
 class Lexer:
     def __init__(self, text):
         self.text = text
+        self.text_len = len(text)
         self.position = 0
         self.current_char = self.text[self.position] if self.text else None
         
     def advance(self):
         self.position += 1
 
-        if self.position >= len(self.text):
+        if self.position >= self.text_len:
             self.current_char = None
         else:
             self.current_char = self.text[self.position]
@@ -29,119 +47,69 @@ class Lexer:
             self.advance()
 
     def number(self):
-        result = ""
-
+        start = self.position
         while self.current_char is not None and self.current_char.isdigit():
-            result += self.current_char
             self.advance()
-
-        return Token(TokenType.NUMBER, int(result))
+        return Token(TokenType.NUMBER, int(self.text[start:self.position]))
     
     def identifier(self):
-        result = ""
-
+        start = self.position
         while self.current_char is not None and (
             self.current_char.isalnum() or self.current_char == "_"
         ):
-            result += self.current_char
             self.advance()
-        
-        if result in KEYWORDS:
-            return Token(KEYWORDS[result], result)
-        
+
+        result = self.text[start:self.position]
+        keyword = KEYWORDS.get(result)
+        if keyword is not None:
+            return Token(keyword, result)
+
         return Token(TokenType.IDENTIFIER, result)
     
     def get_next_token(self):
-        
+        single_char_tokens = SINGLE_CHAR_TOKENS
         while self.current_char is not None:
+            current_char = self.current_char
 
-            if self.current_char.isspace():
+            if current_char.isspace():
                 self.skip_whitespace()
                 continue
 
-            if self.current_char.isdigit():
+            if current_char.isdigit():
                 return self.number()
-            
-            if self.current_char.isalpha():
+
+            if current_char.isalpha():
                 return self.identifier()
-            
-            if self.current_char == "+":
+
+            if current_char == "+":
                 self.advance()
                 return Token(TokenType.PLUS)
-            
-            # UPDATED: Now handles both "-" and "->"
-            if self.current_char == "-":
+
+            if current_char == "-":
                 self.advance()
                 if self.current_char == ">":
                     self.advance()
                     return Token(TokenType.ARROW)
                 return Token(TokenType.MINUS)
-            
-            if self.current_char == "*":
-                self.advance()
-                return Token(TokenType.MULTIPLY)
-            
-            if self.current_char == "/":
-                self.advance()
-                return Token(TokenType.DIVIDE)
-            
-            if self.current_char == "=":
-                self.advance()
-                return Token(TokenType.EQUAL)
-            
-            if self.current_char == ">":
-                self.advance()
-                return Token(TokenType.GREATER)
-            
-            if self.current_char == "<":
-                self.advance()
-                return Token(TokenType.LESS)
 
-            if self.current_char == "(":
+            token_type = single_char_tokens.get(current_char)
+            if token_type is not None:
                 self.advance()
-                return Token(TokenType.LPAREN)
+                return Token(token_type)
 
-            if self.current_char == ")":
-                self.advance()
-                return Token(TokenType.RPAREN)
-            
-            if self.current_char == "{":
-                self.advance()
-                return Token(TokenType.LBRACE)
-
-            if self.current_char == "}":
-                self.advance()
-                return Token(TokenType.RBRACE)
-            
-            # --- NEW SYMBOLS ---
-            if self.current_char == ":":
-                self.advance()
-                return Token(TokenType.COLON)
-                
-            if self.current_char == ",":
-                self.advance()
-                return Token(TokenType.COMMA)
-                
-            if self.current_char == "[":
-                self.advance()
-                return Token(TokenType.LBRACKET)
-                
-            if self.current_char == "]":
-                self.advance()
-                return Token(TokenType.RBRACKET)
-            
-            raise Exception(f"Illegal Character: {self.current_char}")
+            raise Exception(f"Illegal Character: {current_char}")
 
         return Token(TokenType.EOF)
     
     def tokenize(self):
         tokens = []
+        append_token = tokens.append
 
         while True:
             token = self.get_next_token()
-            tokens.append(token)
+            append_token(token)
 
-            if token.type.name == "EOF":
+            if token.type == TokenType.EOF:
                 break
 
         return tokens

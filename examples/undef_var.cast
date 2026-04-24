@@ -1,0 +1,4 @@
+func test -> void {
+    let x: int = undefined_var
+    print(x)
+}

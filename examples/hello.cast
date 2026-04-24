@@ -12,5 +12,5 @@ func calculate_neuron -> int {
     return sum
 }
 
-let ai_result: int = calculate_neuron
+let ai_result: int = calculate_neuron()
 print(ai_result)
