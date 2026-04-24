@@ -18,7 +18,6 @@ class Lexer:
         
     def advance(self):
         self.position += 1
-
         if self.position >= len(self.text):
             self.current_char = None
         else:
@@ -30,19 +29,24 @@ class Lexer:
 
     def number(self):
         result = ""
+        is_float = False
 
-        while self.current_char is not None and self.current_char.isdigit():
+        while self.current_char is not None and (self.current_char.isdigit() or self.current_char == "."):
+            if self.current_char == ".":
+                if is_float:
+                    raise Exception("Invalid number format: too many decimal points")
+                is_float = True
+                
             result += self.current_char
             self.advance()
 
+        if is_float:
+            return Token(TokenType.FLOAT, float(result))
         return Token(TokenType.NUMBER, int(result))
     
     def identifier(self):
         result = ""
-
-        while self.current_char is not None and (
-            self.current_char.isalnum() or self.current_char == "_"
-        ):
+        while self.current_char is not None and (self.current_char.isalnum() or self.current_char == "_"):
             result += self.current_char
             self.advance()
         
@@ -52,11 +56,16 @@ class Lexer:
         return Token(TokenType.IDENTIFIER, result)
     
     def get_next_token(self):
-        
         while self.current_char is not None:
 
             if self.current_char.isspace():
                 self.skip_whitespace()
+                continue
+
+            # Check for comments
+            if self.current_char == '#':
+                while self.current_char is not None and self.current_char != '\n':
+                    self.advance()
                 continue
 
             if self.current_char.isdigit():
@@ -69,7 +78,6 @@ class Lexer:
                 self.advance()
                 return Token(TokenType.PLUS)
             
-            # UPDATED: Now handles both "-" and "->"
             if self.current_char == "-":
                 self.advance()
                 if self.current_char == ">":
@@ -85,17 +93,21 @@ class Lexer:
                 self.advance()
                 return Token(TokenType.DIVIDE)
             
+            # UPDATED: Handles both = and ==
             if self.current_char == "=":
                 self.advance()
-                return Token(TokenType.EQUAL)
+                if self.current_char == "=":
+                    self.advance()
+                    return Token(TokenType.EQUAL_EQUAL, "==")
+                return Token(TokenType.EQUAL, "=")
             
             if self.current_char == ">":
                 self.advance()
-                return Token(TokenType.GREATER)
-            
+                return Token(TokenType.GREATER, ">")
+
             if self.current_char == "<":
                 self.advance()
-                return Token(TokenType.LESS)
+                return Token(TokenType.LESS, "<")
 
             if self.current_char == "(":
                 self.advance()
@@ -113,7 +125,6 @@ class Lexer:
                 self.advance()
                 return Token(TokenType.RBRACE)
             
-            # --- NEW SYMBOLS ---
             if self.current_char == ":":
                 self.advance()
                 return Token(TokenType.COLON)
@@ -129,19 +140,19 @@ class Lexer:
             if self.current_char == "]":
                 self.advance()
                 return Token(TokenType.RBRACKET)
-            
-            raise Exception(f"Illegal Character: {self.current_char}")
+
+            # If we reach here, the character is unknown
+            char = self.current_char
+            self.advance() 
+            raise Exception(f"Illegal Character: {char}")
 
         return Token(TokenType.EOF)
     
     def tokenize(self):
         tokens = []
-
         while True:
             token = self.get_next_token()
             tokens.append(token)
-
             if token.type.name == "EOF":
                 break
-
         return tokens

@@ -1,0 +1,12 @@
+func check_value(x: float) -> float {
+    if x > 10.0 {
+        return 1.0
+    }
+    return 0.0
+}
+
+let a: float = check_value(15.5)
+print(a) # Should print 1.000000
+
+let b: float = check_value(5.0)
+print(b) # Should print 0.000000
