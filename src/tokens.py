@@ -4,11 +4,13 @@ class TokenType(Enum):
     LET = "LET"
     IDENTIFIER = "IDENTIFIER"
     NUMBER = "NUMBER"
+    FLOAT = "FLOAT"
     PLUS = "+"
     MINUS = "-"
     MULTIPLY = "*"
     DIVIDE = "/"
     EQUAL = "="
+    EQUAL_EQUAL = "=="  # <--- NEW: For comparisons (if x == 1.0)
     GREATER = ">"
     LESS = "<"
     LPAREN = "("
@@ -23,7 +25,7 @@ class TokenType(Enum):
     RETURN = "RETURN"
     EOF = "EOF"
     
-    #NEW TOKENS
+    # NEW TOKENS
     COLON = ":"
     COMMA = ","
     LBRACKET = "["
@@ -31,7 +33,7 @@ class TokenType(Enum):
     ARROW = "->"
 
 class Token:
-    def __init__(self, type, value = None):
+    def __init__(self, type, value=None):
         self.type = type
         self.value = value
 
