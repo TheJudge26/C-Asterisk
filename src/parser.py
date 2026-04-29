@@ -1,25 +1,28 @@
 from tokens import TokenType
 
+class AST: pass
 
-# -------------------------
-# AST BASE
-# -------------------------
-class AST:
-    pass
-
-
-# -------------------------
-# AST NODES
-# -------------------------
 class Number(AST):
+    def __init__(self, value): self.value = value
+
+class FloatNode(AST):
+    def __init__(self, value): self.value = value
+
+class StringNode(AST):
     def __init__(self, value):
         self.value = value
 
+class BoolNode(AST):
+    def __init__(self, value):
+        self.value = value
+
+class Call(AST):
+    def __init__(self, name, args):
+        self.name = name
+        self.args = args
 
 class Variable(AST):
-    def __init__(self, name):
-        self.name = name
-
+    def __init__(self, name): self.name = name
 
 class BinaryOp(AST):
     def __init__(self, left, op, right):
@@ -27,23 +30,19 @@ class BinaryOp(AST):
         self.op = op
         self.right = right
 
-
 class VarDecl(AST):
-    def __init__(self, name, value):
+    def __init__(self, name, type_annotation, value):
         self.name = name
+        self.type_annotation = type_annotation
         self.value = value
-
 
 class Assignment(AST):
     def __init__(self, name, value):
         self.name = name
         self.value = value
 
-
 class Print(AST):
-    def __init__(self, value):
-        self.value = value
-
+    def __init__(self, value): self.value = value
 
 class If(AST):
     def __init__(self, condition, body, else_body=None):
@@ -51,41 +50,44 @@ class If(AST):
         self.body = body
         self.else_body = else_body
 
-
 class While(AST):
     def __init__(self, condition, body):
         self.condition = condition
         self.body = body
 
-
-class Return(AST):
-    def __init__(self, value):
-        self.value = value
-
-
-class Function(AST):
-    def __init__(self, name, body):
-        self.name = name
+class For(AST):
+    def __init__(self, var, iterable, body):
+        self.var = var
+        self.iterable = iterable
         self.body = body
 
+class Return(AST):
+    def __init__(self, value): self.value = value
+
+class Function(AST):
+    def __init__(self, name, params, return_type, body):
+        self.name = name
+        self.params = params  
+        self.return_type = return_type
+        self.body = body
+
+class ArrayLiteral(AST):
+    def __init__(self, elements): self.elements = elements
+
+class ArrayIndex(AST):
+    def __init__(self, name, index):
+        self.name = name
+        self.index = index
 
 class Program(AST):
-    def __init__(self, statements):
-        self.statements = statements
+    def __init__(self, statements): self.statements = statements
 
-
-# -------------------------
-# PARSER
-# -------------------------
 class Parser:
     def __init__(self, tokens):
         self.tokens = tokens
         self.pos = 0
         self.current = tokens[self.pos]
 
-    # -------------------------
-    # CORE UTILS
-    # -------------------------
     def advance(self):
         self.pos += 1
         if self.pos < len(self.tokens):
@@ -94,245 +96,240 @@ class Parser:
             self.current = self.tokens[-1]
 
     def peek(self):
-        if self.pos + 1 < len(self.tokens):
-            return self.tokens[self.pos + 1]
-        return None
+        return self.tokens[self.pos + 1] if self.pos + 1 < len(self.tokens) else None
 
     def eat(self, token_type):
-        if self.current.type == token_type:
-            self.advance()
-        else:
-            raise Exception(
-                f"Expected {token_type}, got {self.current.type}"
-            )
+        if self.current.type == token_type: self.advance()
+        else: raise Exception(f"Parser Error: Expected {token_type}, got {self.current.type}")
 
-    # -------------------------
-    # ENTRY POINT
-    # -------------------------
     def parse(self):
         statements = []
-
         while self.current.type != TokenType.EOF:
-            stmt = self.statement()
-            statements.append(stmt)
-
+            statements.append(self.statement())
         return Program(statements)
 
-    # -------------------------
-    # STATEMENTS
-    # -------------------------
     def statement(self):
-        if self.current.type == TokenType.LET:
-            return self.var_decl()
-
-        elif self.current.type == TokenType.PRINT:
-            return self.print_stmt()
-
-        elif self.current.type == TokenType.IF:
-            return self.if_stmt()
-
-        elif self.current.type == TokenType.WHILE:
-            return self.while_stmt()
-
-        elif self.current.type == TokenType.RETURN:
-            return self.return_stmt()
-
-        elif self.current.type == TokenType.FUNC:
-            return self.function_decl()
-
-        elif (
-            self.current.type == TokenType.IDENTIFIER
-            and self.peek()
-            and self.peek().type == TokenType.EQUAL
-        ):
+        if self.current.type == TokenType.LET: return self.var_decl()
+        elif self.current.type == TokenType.PRINT: return self.print_stmt()
+        elif self.current.type == TokenType.IF: return self.if_stmt()
+        elif self.current.type == TokenType.WHILE: return self.while_stmt()
+        elif self.current.type == TokenType.FOR: return self.for_stmt()
+        elif self.current.type == TokenType.RETURN: return self.return_stmt()
+        elif self.current.type == TokenType.FUNC: return self.function_decl()
+        elif self.current.type == TokenType.IDENTIFIER and self.peek() and self.peek().type == TokenType.EQUAL:
             return self.assignment()
+        else: raise Exception(f"Unexpected statement: {self.current.type}")
 
-        else:
-            raise Exception(f"Unexpected statement: {self.current.type}")
-
-    # -------------------------
-    # FUNCTION
-    # -------------------------
     def function_decl(self):
         self.eat(TokenType.FUNC)
-
         name = self.current.value
         self.eat(TokenType.IDENTIFIER)
-
+        self.eat(TokenType.LPAREN)
+        params = []
+        if self.current.type != TokenType.RPAREN:
+            params.append(self.parameter())
+            while self.current.type == TokenType.COMMA:
+                self.eat(TokenType.COMMA)
+                params.append(self.parameter())
+        self.eat(TokenType.RPAREN)
+        self.eat(TokenType.ARROW)
+        return_type = self.current.value
+        self.eat(TokenType.IDENTIFIER)
         body = self.block()
+        return Function(name, params, return_type, body)
 
-        return Function(name, body)
+    def parameter(self):
+        name = self.current.value
+        self.eat(TokenType.IDENTIFIER)
+        self.eat(TokenType.COLON)
+        param_type = ""
+        if self.current.type == TokenType.LBRACKET:
+            self.eat(TokenType.LBRACKET)
+            param_type = "[" + self.current.value + "]"
+            self.eat(TokenType.IDENTIFIER)
+            self.eat(TokenType.RBRACKET)
+        else:
+            param_type = self.current.value
+            self.eat(TokenType.IDENTIFIER)
+        return {"name": name, "type": param_type}
 
-    # -------------------------
-    # ASSIGNMENT
-    # -------------------------
     def assignment(self):
         name = self.current.value
         self.eat(TokenType.IDENTIFIER)
-
         self.eat(TokenType.EQUAL)
-
         value = self.expression()
-
         return Assignment(name, value)
 
-    # -------------------------
-    # let x = expr
-    # -------------------------
     def var_decl(self):
         self.eat(TokenType.LET)
-
         name = self.current.value
         self.eat(TokenType.IDENTIFIER)
-
+        self.eat(TokenType.COLON)
+        type_annotation = ""
+        if self.current.type == TokenType.LBRACKET:
+            self.eat(TokenType.LBRACKET)
+            type_annotation = "[" + self.current.value + "]"
+            self.eat(TokenType.IDENTIFIER)
+            self.eat(TokenType.RBRACKET)
+        else:
+            type_annotation = self.current.value
+            self.eat(TokenType.IDENTIFIER)
         self.eat(TokenType.EQUAL)
-
         value = self.expression()
+        return VarDecl(name, type_annotation, value)
 
-        return VarDecl(name, value)
-
-    # -------------------------
-    # print(expr)
-    # -------------------------
     def print_stmt(self):
         self.eat(TokenType.PRINT)
         self.eat(TokenType.LPAREN)
-
         value = self.expression()
-
         self.eat(TokenType.RPAREN)
-
         return Print(value)
 
-    # -------------------------
-    # if condition (...) else (...)
-    # -------------------------
     def if_stmt(self):
         self.eat(TokenType.IF)
-
         condition = self.expression()
-
         body = self.block()
-
         else_body = None
-
         if self.current.type == TokenType.ELSE:
             self.eat(TokenType.ELSE)
             else_body = self.block()
-
         return If(condition, body, else_body)
 
-    # -------------------------
-    # while condition (...)
-    # -------------------------
     def while_stmt(self):
         self.eat(TokenType.WHILE)
-
         condition = self.expression()
-
         body = self.block()
-
         return While(condition, body)
 
-    # -------------------------
-    # return expr
-    # -------------------------
+    def for_stmt(self):
+        self.eat(TokenType.FOR)
+
+        # variable
+        var_name = self.current.value
+        self.eat(TokenType.IDENTIFIER)
+
+        # "in"
+        if self.current.value != "in":
+            raise Exception("Expected 'in' in for loop")
+
+        self.advance()
+
+        # iterable (range call)
+        iterable = self.expression()
+
+        # body
+        body = self.block()
+
+        return For(var_name, iterable, body)
+
     def return_stmt(self):
         self.eat(TokenType.RETURN)
         value = self.expression()
         return Return(value)
 
-    # -------------------------
-    # BLOCK
-    # -------------------------
     def block(self):
         statements = []
-
         self.eat(TokenType.LBRACE)
-
-        while (
-            self.current.type != TokenType.RBRACE
-            and self.current.type != TokenType.EOF
-        ):
+        while self.current.type != TokenType.RBRACE and self.current.type != TokenType.EOF:
             statements.append(self.statement())
-
         self.eat(TokenType.RBRACE)
-
         return statements
 
-    # -------------------------
-    # EXPRESSIONS
-    # -------------------------
-    def expression(self):
-        return self.comparison()
+    def expression(self): return self.comparison()
 
     def comparison(self):
         node = self.term()
-
-        while self.current.type in (
-            TokenType.GREATER,
-            TokenType.LESS,
-        ):
+        while self.current.type in (TokenType.GREATER, TokenType.LESS, TokenType.EQUAL_EQUAL):
             op = self.current.type
             self.advance()
             right = self.term()
             node = BinaryOp(node, op, right)
-
         return node
 
     def term(self):
         node = self.factor()
-
-        while self.current.type in (
-            TokenType.PLUS,
-            TokenType.MINUS,
-        ):
+        while self.current.type in (TokenType.PLUS, TokenType.MINUS):
             op = self.current.type
             self.advance()
             right = self.factor()
             node = BinaryOp(node, op, right)
-
         return node
 
     def factor(self):
         node = self.unary()
-
-        while self.current.type in (
-            TokenType.MULTIPLY,
-            TokenType.DIVIDE,
-        ):
+        while self.current.type in (TokenType.MULTIPLY, TokenType.DIVIDE):
             op = self.current.type
             self.advance()
             right = self.unary()
             node = BinaryOp(node, op, right)
-
         return node
 
     def unary(self):
-        token = self.current
-
-        if token.type == TokenType.MINUS:
+        if self.current.type == TokenType.MINUS:
             self.advance()
             return BinaryOp(Number(0), TokenType.MINUS, self.primary())
-
         return self.primary()
 
+
+    # Added String/Bool
     def primary(self):
         token = self.current
 
         if token.type == TokenType.NUMBER:
             self.eat(TokenType.NUMBER)
             return Number(token.value)
+        
+        elif token.type == TokenType.FLOAT:
+            self.eat(TokenType.FLOAT)
+            return FloatNode(token.value)
+        
+        elif token.type == TokenType.STRING:
+            self.eat(TokenType.STRING)
+            return StringNode(token.value)
+        
+        elif token.type == TokenType.TRUE:
+            self.eat(TokenType.TRUE)
+            return BoolNode(True)
 
+        elif token.type == TokenType.FALSE:
+            self.eat(TokenType.FALSE)
+            return BoolNode(False)
+        
         elif token.type == TokenType.IDENTIFIER:
+            name = token.value
             self.eat(TokenType.IDENTIFIER)
-            return Variable(token.value)
-
+            if self.current.type == TokenType.LPAREN: # FIXED: Call check added
+                self.eat(TokenType.LPAREN)
+                args = []
+                if self.current.type != TokenType.RPAREN:
+                    args.append(self.expression())
+                    while self.current.type == TokenType.COMMA:
+                        self.eat(TokenType.COMMA)
+                        args.append(self.expression())
+                self.eat(TokenType.RPAREN)
+                return Call(name, args)
+            if self.current.type == TokenType.LBRACKET:
+                self.eat(TokenType.LBRACKET)
+                index = self.expression()
+                self.eat(TokenType.RBRACKET)
+                return ArrayIndex(name, index)
+            return Variable(name)
+        
         elif token.type == TokenType.LPAREN:
             self.eat(TokenType.LPAREN)
             node = self.expression()
             self.eat(TokenType.RPAREN)
             return node
-
-        else:
-            raise Exception(f"Unexpected token: {token.type}")
+        
+        elif token.type == TokenType.LBRACKET:
+            self.eat(TokenType.LBRACKET)
+            elements = []
+            if self.current.type != TokenType.RBRACKET:
+                elements.append(self.expression())
+                while self.current.type == TokenType.COMMA:
+                    self.eat(TokenType.COMMA)
+                    elements.append(self.expression())
+            self.eat(TokenType.RBRACKET)
+            return ArrayLiteral(elements)
+       
+        else: raise Exception(f"Unexpected token: {token.type}")

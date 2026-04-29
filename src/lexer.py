@@ -7,7 +7,11 @@ KEYWORDS = {
     "else": TokenType.ELSE,
     "while": TokenType.WHILE,
     "func": TokenType.FUNC,
-    "return": TokenType.RETURN
+    "return": TokenType.RETURN,
+    "true": TokenType.TRUE,
+    "false": TokenType.FALSE,
+    "for": TokenType.FOR,
+    "in": TokenType.IN,
 }
 
 class Lexer:
@@ -18,7 +22,6 @@ class Lexer:
         
     def advance(self):
         self.position += 1
-
         if self.position >= len(self.text):
             self.current_char = None
         else:
@@ -30,19 +33,24 @@ class Lexer:
 
     def number(self):
         result = ""
+        is_float = False
 
-        while self.current_char is not None and self.current_char.isdigit():
+        while self.current_char is not None and (self.current_char.isdigit() or self.current_char == "."):
+            if self.current_char == ".":
+                if is_float:
+                    raise Exception("Invalid number format: too many decimal points")
+                is_float = True
+                
             result += self.current_char
             self.advance()
 
+        if is_float:
+            return Token(TokenType.FLOAT, float(result))
         return Token(TokenType.NUMBER, int(result))
     
     def identifier(self):
         result = ""
-
-        while self.current_char is not None and (
-            self.current_char.isalnum() or self.current_char == "_"
-        ):
+        while self.current_char is not None and (self.current_char.isalnum() or self.current_char == "_"):
             result += self.current_char
             self.advance()
         
@@ -50,17 +58,45 @@ class Lexer:
             return Token(KEYWORDS[result], result)
         
         return Token(TokenType.IDENTIFIER, result)
+
+    # String Addition
+    
+    def string(self):
+        result = ""
+
+        # Skip opening quote
+        self.advance()
+
+        while self.current_char is not None and self.current_char != '"':
+            result += self.current_char
+            self.advance()
+
+        if self.current_char != '"':
+            raise Exception("Unterminated string literal")
+
+        # Skip closing quote
+        self.advance()
+
+        return Token(TokenType.STRING, result)
     
     def get_next_token(self):
-        
         while self.current_char is not None:
 
             if self.current_char.isspace():
                 self.skip_whitespace()
                 continue
 
+            # Check for comments
+            if self.current_char == '#':
+                while self.current_char is not None and self.current_char != '\n':
+                    self.advance()
+                continue
+
             if self.current_char.isdigit():
                 return self.number()
+            
+            if self.current_char == '"':
+                return self.string()
             
             if self.current_char.isalpha():
                 return self.identifier()
@@ -71,6 +107,9 @@ class Lexer:
             
             if self.current_char == "-":
                 self.advance()
+                if self.current_char == ">":
+                    self.advance()
+                    return Token(TokenType.ARROW)
                 return Token(TokenType.MINUS)
             
             if self.current_char == "*":
@@ -81,17 +120,21 @@ class Lexer:
                 self.advance()
                 return Token(TokenType.DIVIDE)
             
+            # UPDATED: Handles both = and ==
             if self.current_char == "=":
                 self.advance()
-                return Token(TokenType.EQUAL)
+                if self.current_char == "=":
+                    self.advance()
+                    return Token(TokenType.EQUAL_EQUAL, "==")
+                return Token(TokenType.EQUAL, "=")
             
             if self.current_char == ">":
                 self.advance()
-                return Token(TokenType.GREATER)
-            
+                return Token(TokenType.GREATER, ">")
+
             if self.current_char == "<":
                 self.advance()
-                return Token(TokenType.LESS)
+                return Token(TokenType.LESS, "<")
 
             if self.current_char == "(":
                 self.advance()
@@ -109,18 +152,34 @@ class Lexer:
                 self.advance()
                 return Token(TokenType.RBRACE)
             
-            raise Exception(f"Illegal Character: {self.current_char}")
+            if self.current_char == ":":
+                self.advance()
+                return Token(TokenType.COLON)
+                
+            if self.current_char == ",":
+                self.advance()
+                return Token(TokenType.COMMA)
+                
+            if self.current_char == "[":
+                self.advance()
+                return Token(TokenType.LBRACKET)
+                
+            if self.current_char == "]":
+                self.advance()
+                return Token(TokenType.RBRACKET)
+
+            # If we reach here, the character is unknown
+            char = self.current_char
+            self.advance() 
+            raise Exception(f"Illegal Character: {char}")
 
         return Token(TokenType.EOF)
     
     def tokenize(self):
         tokens = []
-
         while True:
             token = self.get_next_token()
             tokens.append(token)
-
             if token.type.name == "EOF":
                 break
-
         return tokens
