@@ -28,9 +28,11 @@ SEMANTIC_TYPES = {
     "bool": "bool"
 }
 
+# len ADDED
 BUILTINS = {
     "range": "range",
     "print": "void",
+    "len": "int",
 }
 
 def is_array_type(t):
@@ -165,11 +167,19 @@ class SemanticAnalyzer:
     def visit_program(self, node):
         for stmt in node.statements:
             self.visit(stmt) 
-            
+
+    # Added type inference        
     def visit_var_decl(self, node):
         var_type = node.type_annotation
         value_type = self.visit(node.value)
 
+        # CASE 1: type inference
+        if var_type is None:
+            inferred_type = value_type
+            self.symbol_table.declare(node.name, inferred_type)
+            return
+        
+        # CASE 2: explicit type
         if var_type in SEMANTIC_TYPES:
             pass
         elif isinstance(var_type, str) and var_type.startswith("[") and var_type.endswith("]"):
@@ -257,8 +267,27 @@ class SemanticAnalyzer:
         self.symbol_table.exit_scope()
 
     # Cleaner Code/Usage
+    # Added len()
     def visit_call(self, node):
         if node.name in BUILTINS:
+
+
+            # SPECIAL CASE: len()
+            if node.name == "len":
+                if len(node.args) != 1:
+                    raise Exception("len() takes exactly one argument")
+
+                arg_type = self.visit(node.args[0])
+
+                if arg_type == "string":
+                    return "int"
+
+                if isinstance(arg_type, str) and arg_type.startswith("["):
+                    return "int"
+
+                raise Exception("len() only works on strings or arrays")
+        
+            # Default builtin handling
             for arg in node.args:
                 self.visit(arg)
             return BUILTINS[node.name]
