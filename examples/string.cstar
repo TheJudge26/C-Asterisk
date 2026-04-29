@@ -1,0 +1,5 @@
+let name: string = "hello"
+
+print(name)
+print(5)
+print(3.14)

@@ -1,0 +1,9 @@
+let is_ready: bool = true
+print(is_ready)
+
+let result: bool = 5 > 3
+print(result)
+
+if is_ready {
+    print("works")
+}
