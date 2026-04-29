@@ -1,26 +1,32 @@
-from tokens import TokenType # NEW: Added this import
+"""
+semantic.py — Type-checking / scope-resolution pass for C*.
+
+Level 6 Updates:
+1. Added validation for the 'bool' primitive type.
+2. Added visitor for Boolean nodes.
+3. Updated BinaryOp to return 'bool' for comparisons (>, <, ==).
+4. Preserved Level 5 N-D array/tensor logic and math built-ins.
+"""
+
+from tokens import TokenType
 from parser import (
-    Program,
-    VarDecl,
-    Assignment,
-    BinaryOp,
-    Number,
-    Variable,
-    Print,
-    If,
-    While,
-    Function,
-    Return,
-    ArrayLiteral,
-    ArrayIndex,
-    Parser,
-    FloatNode,
-    Call, 
+    Program, VarDecl, Assignment, BinaryOp, Number, FloatNode, Boolean,
+    Variable, Print, If, While, Return, Function, Call,
+    ArrayIndex, ArrayLiteral,
 )
+
+
+class SemanticError(Exception):
+    pass
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Symbol table (lexically-scoped)
+# ═══════════════════════════════════════════════════════════════════
 
 class SymbolTable:
     def __init__(self):
-        self.scopes = [{}]
+        self.scopes = [{}]          # stack; index 0 = global scope
 
     def enter_scope(self):
         self.scopes.append({})
@@ -28,143 +34,189 @@ class SymbolTable:
     def exit_scope(self):
         self.scopes.pop()
 
-    def declare(self, name, var_type):
+    def declare(self, name: str, var_type: str):
         if name in self.scopes[-1]:
-            raise Exception(f"Variable '{name}' already declared")
+            raise SemanticError(f"Variable '{name}' is already declared in this scope.")
         self.scopes[-1][name] = var_type
 
-    def assign(self, name, var_type):
-        for scope in reversed(self.scopes):
-            if name in scope:
-                scope[name] = var_type
-                return
-        raise Exception(f"Variable '{name}' not declared")
-
-    def lookup(self, name):
+    def lookup(self, name: str) -> str:
         for scope in reversed(self.scopes):
             if name in scope:
                 return scope[name]
-        raise Exception(f"Variable '{name}' not declared")
+        raise SemanticError(f"Variable '{name}' is not declared.")
+
+    def assign(self, name: str, new_type: str):
+        """Check that an assignment is type-safe."""
+        existing = self.lookup(name)
+        if existing != new_type:
+            # ALLOW WIDENING: Permit int to be assigned to a float
+            if existing == "float" and new_type == "int":
+                return
+            raise SemanticError(
+                f"Type mismatch on assignment to '{name}': "
+                f"expected '{existing}', got '{new_type}'."
+            )
+            
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Semantic analyser
+# ═══════════════════════════════════════════════════════════════════
+
+_MATH_BUILTINS = {"sqrt", "exp"}     # always return float
+
 
 class SemanticAnalyzer:
     def __init__(self):
-        self.symbol_table = SymbolTable()
+        self.symbols = SymbolTable()
 
-    def analyze(self, ast):
-        self.visit(ast)
-        print("   -> [Analyzer is checking rules...]")
+    # ---------------------------------------------------------------- public
 
-    def visit(self, node):
-        if isinstance(node, Program):
-            return self.visit_program(node)
-        elif isinstance(node, VarDecl):
-            return self.visit_var_decl(node)
-        elif isinstance(node, Assignment):
-            return self.visit_assignment(node)
-        elif isinstance(node, BinaryOp):
-            return self.visit_binary_op(node)
-        elif isinstance(node, Number):
-            return "int"
-        elif isinstance(node, FloatNode):
-            return "float"
-        elif isinstance(node, Variable):
-            return self.symbol_table.lookup(node.name)
-        elif isinstance(node, Print):
-            return self.visit(node.value)
-        elif isinstance(node, If):
-            return self.visit_if(node)
-        elif isinstance(node, While):
-            return self.visit_while(node)
-        elif isinstance(node, Function):
-            return self.visit_function(node)
-        elif isinstance(node, Return):
-            return self.visit(node.value)
-        elif isinstance(node, Call):
-            return self.visit_call(node)
-        elif isinstance(node, ArrayLiteral):
-            return self.visit_array_literal(node)
-        elif isinstance(node, ArrayIndex):
-            return self.visit_array_index(node)
-        elif isinstance(node, list):
-            for stmt in node:
-                self.visit(stmt)
-        else:
-            raise Exception(f"Unknown node: {node}")
-        
-    def visit_program(self, node):
+    def analyze(self, ast: Program):
+        self._visit(ast)
+        print("   -> [Semantic Analyzer: all checks passed ✓]")
+
+    # ---------------------------------------------------------------- dispatcher
+
+    def _visit(self, node):
+        if node is None:
+            return None
+        method_name = f"_visit_{type(node).__name__}"
+        method      = getattr(self, method_name, self._visit_list_or_raise)
+        return method(node)
+
+    def _visit_list_or_raise(self, node):
+        if isinstance(node, list):
+            results = [self._visit(s) for s in node]
+            return results[-1] if results else None
+        raise SemanticError(f"No semantic rule for node type '{type(node).__name__}'")
+
+    # ---------------------------------------------------------------- nodes
+
+    def _visit_Program(self, node: Program):
         for stmt in node.statements:
-            self.visit(stmt) 
-            
-    def visit_var_decl(self, node):
-        var_type = node.type_annotation
-        value_type = self.visit(node.value)
-        if var_type != value_type:
-            raise Exception(f"Type mismatch in declaration of {node.name}")
-        self.symbol_table.declare(node.name, var_type) 
+            self._visit(stmt)
 
-    def visit_assignment(self, node):
-        var_type = self.symbol_table.lookup(node.name)
-        value_type = self.visit(node.value)
-        if var_type != value_type:
-            raise Exception(f"Type mismatch in assignment to {node.name}") 
+    def _visit_VarDecl(self, node: VarDecl):
+        val_type = self._visit(node.value)
+        if node.type_annotation != val_type:
+            # ALLOW WIDENING: let x: float = 5
+            if node.type_annotation == "float" and val_type == "int":
+                pass
+            else:
+                raise SemanticError(
+                    f"Type mismatch in declaration of '{node.name}': "
+                    f"annotated as '{node.type_annotation}', got '{val_type}'."
+                )
+        self.symbols.declare(node.name, node.type_annotation)
+
+    def _visit_Assignment(self, node: Assignment):
+        val_type = self._visit(node.value)
+        self.symbols.assign(node.name, val_type)
+
+    def _visit_BinaryOp(self, node: BinaryOp):
+        l = self._visit(node.left)
+        r = self._visit(node.right)
         
-    # UPDATED: Handles comparison operators
-    def visit_binary_op(self, node):
-        left_type = self.visit(node.left)
-        right_type = self.visit(node.right)
+        # 1. Handle Comparisons (Milestone 1)
+        if node.op in (TokenType.GREATER, TokenType.LESS, TokenType.EQUAL_EQUAL):
+            if l != r and not ({l, r} == {"int", "float"}):
+                raise SemanticError(f"Cannot compare different types: '{l}' vs '{r}'.")
+            return "bool"
+            
+        # 2. Handle Math Widening (int + float -> float)
+        if l != r:
+            if {l, r} == {"int", "float"}:
+                return "float"
+            raise SemanticError(
+                f"Type mismatch in binary operation: '{l}' vs '{r}'."
+            )
+        return l
 
-        if left_type == right_type and (left_type == "int" or left_type == "float"):
-            # If the operation is a comparison, the result is ALWAYS an int (0 or 1)
-            if node.op in (TokenType.GREATER, TokenType.LESS, TokenType.EQUAL_EQUAL):
-                return "int"
-            return left_type
+    def _visit_Number(self,    node):  return "int"
+    def _visit_FloatNode(self, node):  return "float"
+    
+    # Milestone 1: Boolean literals
+    def _visit_Boolean(self,   node):  return "bool"
 
-        raise Exception(f"Invalid binary operation: {left_type} {node.op} {right_type}")  
+    def _visit_Variable(self, node: Variable):
+        return self.symbols.lookup(node.name)
 
-    def visit_if(self, node):
-        self.visit(node.condition)
-        self.symbol_table.enter_scope()
-        self.visit(node.body)
-        self.symbol_table.exit_scope()
-        if node.else_body:
-            self.symbol_table.enter_scope()
-            self.visit(node.else_body)
-            self.symbol_table.exit_scope()  
+    def _visit_Print(self, node: Print):
+        return self._visit(node.value)
 
-    def visit_while(self, node):
-        self.visit(node.condition)
-        self.symbol_table.enter_scope()
-        self.visit(node.body)
-        self.symbol_table.exit_scope()
+    def _visit_If(self, node: If):
+        cond_type = self._visit(node.condition)
+        # In Level 6, we prefer formal 'bool' for conditions
+        if cond_type not in ("bool", "int"):
+            raise SemanticError(f"IF condition must be bool or int, got '{cond_type}'.")
+            
+        self.symbols.enter_scope()
+        self._visit(node.body)
+        self.symbols.exit_scope()
+        if node.else_body is not None:
+            self.symbols.enter_scope()
+            self._visit(node.else_body)
+            self.symbols.exit_scope()
 
-    def visit_function(self, node):
-        self.symbol_table.declare(node.name, node.return_type) 
-        self.symbol_table.enter_scope()
+    def _visit_While(self, node: While):
+        cond_type = self._visit(node.condition)
+        if cond_type not in ("bool", "int"):
+            raise SemanticError(f"WHILE condition must be bool or int, got '{cond_type}'.")
+            
+        self.symbols.enter_scope()
+        self._visit(node.body)
+        self.symbols.exit_scope()
+
+    def _visit_Function(self, node: Function):
+        # Register the function name in the outer scope
+        self.symbols.declare(node.name, node.return_type)
+        self.symbols.enter_scope()
         for param in node.params:
-            self.symbol_table.declare(param['name'], param['type'])
-        self.visit(node.body)
-        self.symbol_table.exit_scope()
+            self.symbols.declare(param["name"], param["type"])
+        self._visit(node.body)
+        self.symbols.exit_scope()
 
-    def visit_call(self, node):
-        return_type = self.symbol_table.lookup(node.name)
-        for arg in node.args:
-            self.visit(arg)
-        return return_type
+    def _visit_Return(self, node: Return):
+        return self._visit(node.value)
 
-    def visit_array_literal(self, node):
-        if not node.elements:
+    def _visit_Call(self, node: Call):
+        if node.name in _MATH_BUILTINS:
+            if len(node.args) != 1:
+                raise SemanticError(f"'{node.name}' expects exactly 1 argument.")
+            self._visit(node.args[0])
+            return "float"
+        return self.symbols.lookup(node.name)
+
+    def _visit_ArrayLiteral(self, node: ArrayLiteral):
+        """Semantic Analysis: Determines the TYPE of the array."""
+        if not node.elements: 
             return "[]"
-        first_type = self.visit(node.elements[0])
-        for el in node.elements:
-            if self.visit(el) != first_type:
-                raise Exception("Array elements must have same type")
-        return f"[{first_type}]"
+        
+        # Get the type of the first element (e.g., "float")
+        first_type = self._visit(node.elements[0])
+        final_type = first_type
+        
+        for el in node.elements[1:]:
+            el_type = self._visit(el)
+            if el_type != final_type:
+                # Support implicit widening: [1, 2.5] becomes [float]
+                if {final_type, el_type} == {"int", "float"}:
+                    final_type = "float"
+                else:
+                    raise SemanticError(f"Mixed types in array: '{final_type}' vs '{el_type}'.")
+        
+        return f"[{final_type}]"
 
-    def visit_array_index(self, node):
-        array_type = self.symbol_table.lookup(node.name)
-        if not array_type.startswith("["):
-            raise Exception(f"{node.name} is not an array")
-        index_type = self.visit(node.index)
-        if index_type != "int":
-            raise Exception("Array index must be int")
-        return array_type[1:-1]
+    def _visit_ArrayIndex(self, node: ArrayIndex):
+        """Preserves Level 5 recursive array indexing."""
+        base_type  = self._visit(node.name)
+        idx_type   = self._visit(node.index)
+        if idx_type != "int":
+            raise SemanticError("Array index must be of type 'int'.")
+        if not base_type.startswith("["):
+            raise SemanticError(
+                f"Cannot index into non-array type '{base_type}'."
+            )
+        # Strip one layer of brackets: "[[float]]" -> "[float]"
+        return base_type[1:-1]

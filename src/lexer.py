@@ -1,158 +1,161 @@
 from tokens import Token, TokenType
 
 KEYWORDS = {
-    "let": TokenType.LET,
-    "print": TokenType.PRINT,
-    "if": TokenType.IF,
-    "else": TokenType.ELSE,
-    "while": TokenType.WHILE,
-    "func": TokenType.FUNC,
-    "return": TokenType.RETURN
+    "let":    TokenType.LET,
+    "print":  TokenType.PRINT,
+    "if":     TokenType.IF,
+    "else":   TokenType.ELSE,
+    "while":  TokenType.WHILE,
+    "func":   TokenType.FUNC,
+    "return": TokenType.RETURN,
+    "true":   TokenType.TRUE,
+    "false":  TokenType.FALSE,
+    "bool":   TokenType.BOOL_TYPE,
 }
 
+
+class LexerError(Exception):
+    pass
+
+
 class Lexer:
-    def __init__(self, text):
-        self.text = text
-        self.position = 0
-        self.current_char = self.text[self.position] if self.text else None
-        
-    def advance(self):
-        self.position += 1
-        if self.position >= len(self.text):
-            self.current_char = None
+    """
+    Converts a C* source string into a flat list of Token objects.
+    Every token carries its exact line and column for diagnostic messages.
+    """
+
+    def __init__(self, text: str):
+        self.text    = text
+        self.pos     = 0
+        self.line    = 1
+        self.column  = 1
+        self.current = self.text[0] if self.text else None
+
+    # ------------------------------------------------------------------ helpers
+
+    def _advance(self):
+        """Move forward one character, updating line/column counters."""
+        if self.current == '\n':
+            self.line  += 1
+            self.column = 1
         else:
-            self.current_char = self.text[self.position]
+            self.column += 1
+        self.pos += 1
+        self.current = self.text[self.pos] if self.pos < len(self.text) else None
 
-    def skip_whitespace(self):
-        while self.current_char is not None and self.current_char.isspace():
-            self.advance()
+    def _skip_whitespace(self):
+        while self.current is not None and self.current.isspace():
+            self._advance()
 
-    def number(self):
-        result = ""
-        is_float = False
+    def _skip_line_comment(self):
+        """Skip from '#' to end-of-line."""
+        while self.current is not None and self.current != '\n':
+            self._advance()
 
-        while self.current_char is not None and (self.current_char.isdigit() or self.current_char == "."):
-            if self.current_char == ".":
-                if is_float:
-                    raise Exception("Invalid number format: too many decimal points")
+    # ------------------------------------------------------------------ scanners
+
+    def _scan_number(self) -> Token:
+        start_line, start_col = self.line, self.column
+        result    = ""
+        is_float  = False
+        dot_count = 0
+
+        while self.current is not None and (self.current.isdigit() or self.current == '.'):
+            if self.current == '.':
+                dot_count += 1
+                if dot_count > 1:
+                    raise LexerError(
+                        f"Line {self.line}, Col {self.column}: "
+                        "Invalid number — multiple decimal points."
+                    )
                 is_float = True
-                
-            result += self.current_char
-            self.advance()
+            result += self.current
+            self._advance()
 
-        if is_float:
-            return Token(TokenType.FLOAT, float(result))
-        return Token(TokenType.NUMBER, int(result))
-    
-    def identifier(self):
+        tok_type = TokenType.FLOAT if is_float else TokenType.NUMBER
+        tok_val  = float(result)   if is_float else int(result)
+        return Token(tok_type, tok_val, start_line, start_col)
+
+    def _scan_identifier_or_keyword(self) -> Token:
+        start_line, start_col = self.line, self.column
         result = ""
-        while self.current_char is not None and (self.current_char.isalnum() or self.current_char == "_"):
-            result += self.current_char
-            self.advance()
-        
-        if result in KEYWORDS:
-            return Token(KEYWORDS[result], result)
-        
-        return Token(TokenType.IDENTIFIER, result)
-    
-    def get_next_token(self):
-        while self.current_char is not None:
 
-            if self.current_char.isspace():
-                self.skip_whitespace()
+        while self.current is not None and (self.current.isalnum() or self.current == '_'):
+            result += self.current
+            self._advance()
+
+        tok_type = KEYWORDS.get(result, TokenType.IDENTIFIER)
+        return Token(tok_type, result, start_line, start_col)
+
+    # ------------------------------------------------------------------ public API
+
+    def get_next_token(self) -> Token:
+        while self.current is not None:
+
+            # ---- whitespace
+            if self.current.isspace():
+                self._skip_whitespace()
                 continue
 
-            # Check for comments
-            if self.current_char == '#':
-                while self.current_char is not None and self.current_char != '\n':
-                    self.advance()
+            # ---- line comment
+            if self.current == '#':
+                self._skip_line_comment()
                 continue
 
-            if self.current_char.isdigit():
-                return self.number()
-            
-            if self.current_char.isalpha():
-                return self.identifier()
-            
-            if self.current_char == "+":
-                self.advance()
-                return Token(TokenType.PLUS)
-            
-            if self.current_char == "-":
-                self.advance()
-                if self.current_char == ">":
-                    self.advance()
-                    return Token(TokenType.ARROW)
-                return Token(TokenType.MINUS)
-            
-            if self.current_char == "*":
-                self.advance()
-                return Token(TokenType.MULTIPLY)
-            
-            if self.current_char == "/":
-                self.advance()
-                return Token(TokenType.DIVIDE)
-            
-            # UPDATED: Handles both = and ==
-            if self.current_char == "=":
-                self.advance()
-                if self.current_char == "=":
-                    self.advance()
-                    return Token(TokenType.EQUAL_EQUAL, "==")
-                return Token(TokenType.EQUAL, "=")
-            
-            if self.current_char == ">":
-                self.advance()
-                return Token(TokenType.GREATER, ">")
+            # ---- numbers
+            if self.current.isdigit():
+                return self._scan_number()
 
-            if self.current_char == "<":
-                self.advance()
-                return Token(TokenType.LESS, "<")
+            # ---- identifiers / keywords
+            if self.current.isalpha() or self.current == '_':
+                return self._scan_identifier_or_keyword()
 
-            if self.current_char == "(":
-                self.advance()
-                return Token(TokenType.LPAREN)
+            # ---- single / double character operators & punctuation
+            ch  = self.current
+            ln  = self.line
+            col = self.column
 
-            if self.current_char == ")":
-                self.advance()
-                return Token(TokenType.RPAREN)
-            
-            if self.current_char == "{":
-                self.advance()
-                return Token(TokenType.LBRACE)
+            if ch == '+':  self._advance(); return Token(TokenType.PLUS,     None, ln, col)
+            if ch == '*':  self._advance(); return Token(TokenType.MULTIPLY,  None, ln, col)
+            if ch == '/':  self._advance(); return Token(TokenType.DIVIDE,    None, ln, col)
+            if ch == '(':  self._advance(); return Token(TokenType.LPAREN,    None, ln, col)
+            if ch == ')':  self._advance(); return Token(TokenType.RPAREN,    None, ln, col)
+            if ch == '{':  self._advance(); return Token(TokenType.LBRACE,    None, ln, col)
+            if ch == '}':  self._advance(); return Token(TokenType.RBRACE,    None, ln, col)
+            if ch == '[':  self._advance(); return Token(TokenType.LBRACKET,  None, ln, col)
+            if ch == ']':  self._advance(); return Token(TokenType.RBRACKET,  None, ln, col)
+            if ch == ':':  self._advance(); return Token(TokenType.COLON,     None, ln, col)
+            if ch == ',':  self._advance(); return Token(TokenType.COMMA,     None, ln, col)
+            if ch == '>':  self._advance(); return Token(TokenType.GREATER,   None, ln, col)
+            if ch == '<':  self._advance(); return Token(TokenType.LESS,      None, ln, col)
 
-            if self.current_char == "}":
-                self.advance()
-                return Token(TokenType.RBRACE)
-            
-            if self.current_char == ":":
-                self.advance()
-                return Token(TokenType.COLON)
-                
-            if self.current_char == ",":
-                self.advance()
-                return Token(TokenType.COMMA)
-                
-            if self.current_char == "[":
-                self.advance()
-                return Token(TokenType.LBRACKET)
-                
-            if self.current_char == "]":
-                self.advance()
-                return Token(TokenType.RBRACKET)
+            if ch == '-':
+                self._advance()
+                if self.current == '>':
+                    self._advance()
+                    return Token(TokenType.ARROW, None, ln, col)
+                return Token(TokenType.MINUS, None, ln, col)
 
-            # If we reach here, the character is unknown
-            char = self.current_char
-            self.advance() 
-            raise Exception(f"Illegal Character: {char}")
+            if ch == '=':
+                self._advance()
+                if self.current == '=':
+                    self._advance()
+                    return Token(TokenType.EQUAL_EQUAL, None, ln, col)
+                return Token(TokenType.EQUAL, None, ln, col)
 
-        return Token(TokenType.EOF)
-    
-    def tokenize(self):
+            # ---- unrecognised character
+            self._advance()
+            raise LexerError(
+                f"Line {ln}, Col {col}: Illegal character {ch!r}"
+            )
+
+        return Token(TokenType.EOF, None, self.line, self.column)
+
+    def tokenize(self) -> list:
         tokens = []
         while True:
-            token = self.get_next_token()
-            tokens.append(token)
-            if token.type.name == "EOF":
+            tok = self.get_next_token()
+            tokens.append(tok)
+            if tok.type == TokenType.EOF:
                 break
         return tokens
