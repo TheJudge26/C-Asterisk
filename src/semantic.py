@@ -19,6 +19,9 @@ from parser import (
     StringNode,
     BoolNode,
     For,
+    ClassDecl, 
+    MemberAccess, 
+    Import
 )
 
 SEMANTIC_TYPES = {
@@ -86,6 +89,8 @@ class SymbolTable:
 class SemanticAnalyzer:
     def __init__(self):
         self.symbol_table = SymbolTable()
+        self.class_table = {}   # NEW
+        self.module_table = {}  # for imports
 
     def analyze(self, ast):
         self.visit(ast)
@@ -138,11 +143,11 @@ class SemanticAnalyzer:
         elif isinstance(node, ArrayLiteral):
             return self.visit_array_literal(node)
         
-        elif isinstance(node, ArrayIndex):
-            array_type = self.symbol_table.lookup(node.name)
+        elif isinstance(node, ArrayIndex): # Updated ArrayIndex 
+            array_type = self.visit(node.array)
 
             if not is_array_type(array_type):
-                raise Exception(f"{node.name} is not an array")
+                raise Exception("Not an array")
 
             index_type = self.visit(node.index)
 
@@ -155,12 +160,24 @@ class SemanticAnalyzer:
             for stmt in node:
                 self.visit(stmt)
         
+        elif isinstance(node, Import):
+            return self.visit_import(node)
+
         elif isinstance(node, StringNode):
             return "string"
         
         elif isinstance(node, BoolNode):
             return "bool"
         
+        elif isinstance(node, ClassDecl):
+            return self.visit_class(node)
+        
+        elif isinstance(node, ClassDecl):
+            return self.visit_class(node)
+        
+        elif isinstance(node, MemberAccess):
+            return self.visit_member_access(node)
+
         else:
             raise Exception(f"Unknown node: {node}")
         
@@ -181,6 +198,8 @@ class SemanticAnalyzer:
         
         # CASE 2: explicit type
         if var_type in SEMANTIC_TYPES:
+            pass
+        elif var_type in self.class_table:   # NEW: allow class type
             pass
         elif isinstance(var_type, str) and var_type.startswith("[") and var_type.endswith("]"):
             inner_type = var_type[1:-1]
@@ -269,8 +288,30 @@ class SemanticAnalyzer:
     # Cleaner Code/Usage
     # Added len()
     def visit_call(self, node):
-        if node.name in BUILTINS:
 
+        # NEW: method call
+        if hasattr(node, "object"):
+            obj_type = self.visit(node.object)
+
+            if obj_type not in self.class_table:
+                raise Exception(f"{obj_type} has no methods")
+
+            class_info = self.class_table[obj_type]
+
+            if node.name not in class_info["methods"]:
+                raise Exception(f"Method {node.name} not found in {obj_type}")
+
+            method = class_info["methods"][node.name]
+
+            if len(node.args) != len(method["params"]):
+                raise Exception("Argument count mismatch")
+
+            for arg in node.args:
+                self.visit(arg)
+
+            return method["return"]
+        
+        if node.name in BUILTINS:
 
             # SPECIAL CASE: len()
             if node.name == "len":
@@ -287,10 +328,15 @@ class SemanticAnalyzer:
 
                 raise Exception("len() only works on strings or arrays")
         
+
             # Default builtin handling
             for arg in node.args:
                 self.visit(arg)
             return BUILTINS[node.name]
+        
+        # NEW: constructor call
+        if node.name in self.class_table:
+            return node.name
     
         return_type = self.symbol_table.lookup(node.name)
 
@@ -307,12 +353,63 @@ class SemanticAnalyzer:
             if self.visit(el) != first_type:
                 raise Exception("Array elements must have same type")
         return f"[{first_type}]"
+    
+    # Added class decl handler
+    def visit_class(self, node):
+        if node.name in self.class_table:
+            raise Exception(f"Class '{node.name}' already declared")
 
-    def visit_array_index(self, node):
-        array_type = self.symbol_table.lookup(node.name)
-        if not array_type.startswith("["):
-            raise Exception(f"{node.name} is not an array")
-        index_type = self.visit(node.index)
-        if index_type != "int":
-            raise Exception("Array index must be int")
-        return array_type[1:-1]
+        fields = {}
+        methods = {}
+
+        # First pass: collect fields & methods
+        for member in node.body:
+            if isinstance(member, VarDecl):
+                fields[member.name] = member.type_annotation
+            elif isinstance(member, Function):
+                methods[member.name] = {
+                    "params": member.params,
+                    "return": member.return_type
+                }
+
+        self.class_table[node.name] = {
+            "fields": fields,
+            "methods": methods
+        }
+
+        # Optional: validate inside class
+        self.symbol_table.enter_scope()
+
+        for member in node.body:
+            self.visit(member)
+
+        self.symbol_table.exit_scope()
+
+    def visit_import(self, node):
+        module_name = node.module
+
+        if module_name not in self.module_table:
+            raise Exception(f"Module '{module_name}' not found")
+
+        module = self.module_table[module_name]
+
+        for name, typ in module.items():
+            self.symbol_table.declare(name, typ)
+
+    def visit_member_access(self, node):
+        obj_type = self.visit(node.object)
+
+        if obj_type not in self.class_table:
+            raise Exception(f"{obj_type} is not a class instance")
+
+        class_info = self.class_table[obj_type]
+
+        if node.member in class_info["fields"]:
+            return class_info["fields"][node.member]
+
+        if node.member in class_info["methods"]:
+            return class_info["methods"][node.member]["return"]
+
+        raise Exception(f"{node.member} not found in class {obj_type}")
+
+     
