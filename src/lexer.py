@@ -12,6 +12,8 @@ KEYWORDS = {
     "false": TokenType.FALSE,
     "for": TokenType.FOR,
     "in": TokenType.IN,
+    "class": TokenType.CLASS, # Added class
+    "import": TokenType.IMPORT, # Added import
 }
 
 class Lexer:
@@ -95,6 +97,10 @@ class Lexer:
             if self.current_char.isdigit():
                 return self.number()
             
+            if self.current_char == ".": # Added Dot handeling
+                self.advance()
+                return Token(TokenType.DOT)
+
             if self.current_char == '"':
                 return self.string()
             
@@ -167,7 +173,7 @@ class Lexer:
             if self.current_char == "]":
                 self.advance()
                 return Token(TokenType.RBRACKET)
-
+            
             # If we reach here, the character is unknown
             char = self.current_char
             self.advance() 

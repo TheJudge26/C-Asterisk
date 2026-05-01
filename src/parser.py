@@ -75,12 +75,35 @@ class ArrayLiteral(AST):
     def __init__(self, elements): self.elements = elements
 
 class ArrayIndex(AST):
-    def __init__(self, name, index):
-        self.name = name
+    def __init__(self, array, index):# Changed name to array for better member access compatibility
+        self.array = array
         self.index = index
 
 class Program(AST):
     def __init__(self, statements): self.statements = statements
+
+# Class declaration added
+class ClassDecl(AST):
+    def __init__(self, name, body):
+        self.name = name
+        self.body = body
+
+# Added Member Access from classes
+class MemberAccess(AST):
+    def __init__(self, obj, member):
+        self.object = obj
+        self.member = member
+
+# Added import
+class Import(AST):
+    def __init__(self, module):
+        self.module = module
+
+# Added from import
+class FromImport(AST):
+    def __init__(self, module, name):
+        self.module = module
+        self.name = name
 
 class Parser:
     def __init__(self, tokens):
@@ -118,6 +141,10 @@ class Parser:
         elif self.current.type == TokenType.FUNC: return self.function_decl()
         elif self.current.type == TokenType.IDENTIFIER and self.peek() and self.peek().type == TokenType.EQUAL:
             return self.assignment()
+        elif self.current.type == TokenType.CLASS: # Added class statement
+            return self.class_decl()
+        elif self.current.type == TokenType.IMPORT: # Added import statment
+            return self.import_stmt()
         else: raise Exception(f"Unexpected statement: {self.current.type}")
 
     def function_decl(self):
@@ -137,6 +164,21 @@ class Parser:
         self.eat(TokenType.IDENTIFIER)
         body = self.block()
         return Function(name, params, return_type, body)
+
+    def class_decl(self): # Added class declaration method
+        self.eat(TokenType.CLASS)
+        name = self.current.value
+        self.eat(TokenType.IDENTIFIER)
+
+        body = self.block()
+
+        return ClassDecl(name, body)
+    
+    def import_stmt(self): # Added import method
+        self.eat(TokenType.IMPORT)
+        module_name = self.current.value
+        self.eat(TokenType.IDENTIFIER)
+        return Import(module_name)
 
     def parameter(self):
         name = self.current.value
@@ -298,22 +340,47 @@ class Parser:
         elif token.type == TokenType.IDENTIFIER:
             name = token.value
             self.eat(TokenType.IDENTIFIER)
-            if self.current.type == TokenType.LPAREN: # FIXED: Call check added
-                self.eat(TokenType.LPAREN)
-                args = []
-                if self.current.type != TokenType.RPAREN:
-                    args.append(self.expression())
-                    while self.current.type == TokenType.COMMA:
-                        self.eat(TokenType.COMMA)
+
+            # Added while loop for multiple members access
+            while True:
+                # Function call (old)
+                if self.current.type == TokenType.LPAREN: # FIXED: Call check added
+                    self.eat(TokenType.LPAREN)
+                    args = []
+                    if self.current.type != TokenType.RPAREN:
                         args.append(self.expression())
-                self.eat(TokenType.RPAREN)
-                return Call(name, args)
-            if self.current.type == TokenType.LBRACKET:
-                self.eat(TokenType.LBRACKET)
-                index = self.expression()
-                self.eat(TokenType.RBRACKET)
-                return ArrayIndex(name, index)
-            return Variable(name)
+                        while self.current.type == TokenType.COMMA:
+                            self.eat(TokenType.COMMA)
+                            args.append(self.expression())
+                    self.eat(TokenType.RPAREN)
+                    # return Call(name, args)
+                
+                # NEW: Distinguishing betweeb normal call vs method call
+                if isinstance(node, MemberAccess):
+                    call = Call(node.member, args)
+                    call.object = node.object
+                    node = call
+                else:
+                    node = Call(node.name, args)
+
+                # Array indexing (old)  
+                if self.current.type == TokenType.LBRACKET:
+                    self.eat(TokenType.LBRACKET)
+                    index = self.expression()
+                    self.eat(TokenType.RBRACKET)
+                    return ArrayIndex(node, index) # name -> node
+                # return Variable(name)
+            
+                # NEW: member access
+                if self.current.type == TokenType.DOT:
+                    self.eat(TokenType.DOT)
+                    member_name = self.current.value
+                    self.eat(TokenType.IDENTIFIER)
+                    node = MemberAccess(node, member_name)
+                else:
+                    break
+
+            return node
         
         elif token.type == TokenType.LPAREN:
             self.eat(TokenType.LPAREN)

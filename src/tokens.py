@@ -47,6 +47,12 @@ class TokenType(Enum):
     RBRACKET = "]"
     ARROW = "->"
     
+    # NEW: DOT/CLASS/IMPORT/FROM/AS
+    DOT = "."
+    CLASS = "CLASS"
+    IMPORT = "IMPORT"
+    FROM = "FROM"
+    AS = "AS"
 
 class Token:
     def __init__(self, type, value=None):
