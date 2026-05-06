@@ -1,0 +1,32 @@
+class NeuralNetwork {
+    # 1. The Data
+    let inputs: [float] = [1.0, 0.5, -1.5]
+    let weights: [float] = [0.2, 0.8, -0.5]
+    let bias: float = 0.1
+    
+    # 2. The Logic (Forward Pass)
+    func forward() -> float {
+        let sum: float = self.bias
+        let size: int = len(self.inputs)
+        
+        # 3. Dot Product Loop
+        for i in size {
+            let in_val: float = self.inputs[i]
+            let w_val: float = self.weights[i]
+            sum = sum + (in_val * w_val)
+        }
+        
+        # 4. ReLU Activation Function
+        if sum < 0.0 {
+            return 0.0
+        }
+        
+        return sum
+    }
+}
+
+# 5. Execution
+let nn = NeuralNetwork()
+let output: float = nn.forward()
+
+print(output)

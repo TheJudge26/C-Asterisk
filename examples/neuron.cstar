@@ -1,0 +1,15 @@
+let inputs: [float] = [1.5, 2.0]
+let weights: [float] = [0.5, -0.2]
+let bias: float = 0.1
+
+let sum: float = bias
+
+# Dot Product (Matrix Math)
+for i in 2 {
+    sum = sum + (inputs[i] * weights[i])
+}
+
+# Sigmoid Activation Function
+let activation: float = 1.0 / (1.0 + exp(0.0 - sum))
+
+print(activation)

@@ -25,6 +25,7 @@ BUILTINS = {
     "range": "range",
     "print": "void",
     "len": "int",
+    "exp": "float",
 }
 
 def normalize_type(t):
@@ -286,7 +287,11 @@ class SemanticAnalyzer:
 
         iterable = self.visit(node.iterable)
 
-        if iterable == ("range", "int"):
+        # FIX: Allow raw "int" to be used as a loop limit
+        if iterable == "int":
+            self.symbol_table.declare(node.var, "int")
+
+        elif iterable == ("range", "int"):
             self.symbol_table.declare(node.var, "int")
 
         elif is_array_type(iterable):
@@ -294,13 +299,13 @@ class SemanticAnalyzer:
 
         else:
             self.errors.add(SemanticError(f"Invalid iterable type: {iterable}"))
+            self.symbol_table.exit_scope() # Keep scope clean on error
             return
 
         for stmt in node.body:
             self.visit(stmt)
 
         self.symbol_table.exit_scope()
-
     # -----------------------------
     # FUNCTION
     # -----------------------------
@@ -325,16 +330,40 @@ class SemanticAnalyzer:
         self.current_return_type = None
 
     # -----------------------------
-    # CALLS (FIXED & CLEAN)
+    # CALLS
     # -----------------------------
     def visit_call(self, node):
+        # 1. Method Calls
+        if getattr(node, "object", None) is not None:
+            obj_type = self.visit(node.object)
+            if obj_type in self.class_table:
+                cls = self.class_table[obj_type]
+                if node.name in cls["methods"]:
+                    return cls["methods"][node.name]["return"]
+            self.errors.add(SemanticError(f"Method '{node.name}' not found"))
+            return None
 
-        func = self.symbol_table.lookup(node.name)
+        # 2. Builtins
+        if node.name in BUILTINS:
+            for a in node.args:
+                self.visit(a)
+            return BUILTINS[node.name]
 
-        # function call
+        # 3. Class Constructors
+        if node.name in self.class_table:
+            for a in node.args:
+                self.visit(a)
+            return node.name
+
+        # 4. Standard Functions
+        func = None
+        for scope in reversed(self.symbol_table.scopes):
+            if node.name in scope:
+                func = scope[node.name]
+                break
+
         if isinstance(func, dict) and func.get("type") == "function":
             params = func["params"]
-
             if len(params) != len(node.args):
                 self.errors.add(SemanticError("Argument count mismatch"))
                 return func["return"]
@@ -343,24 +372,43 @@ class SemanticAnalyzer:
                 arg_type = self.visit(node.args[i])
                 if arg_type != params[i]["type"]:
                     self.errors.add(SemanticError(
-                        f"Argument type mismatch: expected {params[i]['type']} got {arg_type}"
+                        f"Argument mismatch: expected {params[i]['type']} got {arg_type}"
                     ))
-
             return func["return"]
 
-        # class constructor
-        if node.name in self.class_table:
-            for a in node.args:
-                self.visit(a)
-            return node.name
+        self.errors.add(SemanticError(f"Function '{node.name}' not declared"))
+        return None
+        # -----------------------------------------------------
 
-        # builtins
-        if node.name in BUILTINS:
-            for a in node.args:
-                self.visit(a)
-            return BUILTINS[node.name]
+        # Check if we are trying to build a Class Object
+        if node.name in self.classes:
+            class_info = self.classes[node.name]
+            ptr = self.builder.alloca(class_info["type"], name=f"new_{node.name}")
+            
+            for i, default_node in enumerate(class_info["defaults"]):
+                if default_node: 
+                    val = self.visit(default_node) 
+                    field_ptr = self.builder.gep(ptr, [self.i32(0), self.i32(i)], inbounds=True)
+                    self.builder.store(val, field_ptr) 
+            
+            return self.builder.load(ptr)
 
-        return self.symbol_table.lookup(node.name)
+        # Handle Built-in Math
+        if node.name == "exp":
+            arg = self.visit(node.args[0])
+            if arg.type != self.f64:
+                arg = self.builder.sitofp(arg, self.f64)
+            return self.builder.call(self.exp_func, [arg])
+
+        # Standard function calls
+        func = self.module.globals.get(node.name)
+        if func is None:
+            raise Exception(f"Undefined function {node.name}")
+
+        args = [self.visit(a) for a in node.args]
+        return self.builder.call(func, args)
+        
+        
 
     # -----------------------------
     # ARRAY
@@ -393,6 +441,10 @@ class SemanticAnalyzer:
             if isinstance(m, VarDecl):
                 fields[m.name] = m.type_annotation
             elif isinstance(m, Function):
+                
+                if not any(p["name"] == "self" for p in m.params):
+                    m.params.insert(0, {"name": "self", "type": node.name})
+                
                 methods[m.name] = {
                     "params": m.params,
                     "return": m.return_type

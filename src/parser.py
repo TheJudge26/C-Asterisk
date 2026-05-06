@@ -368,6 +368,20 @@ class Parser:
     def primary(self):
         token = self.current
 
+# UNARY MINUS
+        if token.type == TokenType.MINUS:
+            self.eat(TokenType.MINUS)
+            if self.current.type == TokenType.FLOAT:
+                val = self.current.value
+                self.eat(TokenType.FLOAT)
+                return FloatNode(-val)
+            elif self.current.type == TokenType.NUMBER:
+                val = self.current.value
+                self.eat(TokenType.NUMBER)
+                return Number(-val)
+            else:
+                raise ParserError("Expected a number after '-'", token.line, token.column)
+            
         # literals
         if token.type == TokenType.NUMBER:
             self.eat(TokenType.NUMBER)
@@ -464,12 +478,14 @@ class Parser:
     def expression(self, precedence=0):
         left = self.primary()
 
-        while self.current.type in self.PRECEDENCE and self.PRECEDENCE[self.current.type] > precedence:
+        # Fix: Removed 'self.' from PRECEDENCE
+        while self.current.type in PRECEDENCE and PRECEDENCE[self.current.type] > precedence:
 
             op = self.current
             self.advance()
 
-            right = self.expression(self.PRECEDENCE[op.type] + 1)
+            # Fix: Removed 'self.' from PRECEDENCE
+            right = self.expression(PRECEDENCE[op.type] + 1)
 
             left = BinaryOp(left, op.type, right)
 
@@ -481,3 +497,30 @@ class Parser:
         self.eat(TokenType.EQUAL)
         value = self.expression()
         return Assignment(name, value)
+    
+    def var_decl(self):
+        """Parses a variable declaration: let name: type = value"""
+        self.eat(TokenType.LET)
+        
+        # 1. Get the variable name
+        name = self.current.value
+        self.eat(TokenType.IDENTIFIER)
+
+        # 2. Get the type annotation (e.g., ': int' or ': [float]')
+        type_annotation = None
+        if self.current.type == TokenType.COLON:
+            self.eat(TokenType.COLON)
+            if self.current.type == TokenType.LBRACKET:
+                self.eat(TokenType.LBRACKET)
+                type_annotation = f"[{self.current.value}]"
+                self.eat(TokenType.IDENTIFIER)
+                self.eat(TokenType.RBRACKET)
+            else:
+                type_annotation = str(self.current.value)
+                self.eat(TokenType.IDENTIFIER)
+
+        # 3. Get the value
+        self.eat(TokenType.EQUAL)
+        value = self.expression()
+
+        return VarDecl(name, type_annotation, value)

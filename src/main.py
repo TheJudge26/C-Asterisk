@@ -59,7 +59,7 @@ def main():
         sys.exit(1)
 
     if analyzer.errors.has_errors():
-        analyzer.errors.print_all()
+        analyzer.errors.print_errors()
         print("Compilation failed.")
         sys.exit(1)
 
@@ -83,3 +83,8 @@ def main():
         sys.exit(1)
 
     print("Success! (Pipeline is completely wired up)")
+
+# CRITICAL FIX: This tells Python to actually execute the main() function 
+# when you run `python src/main.py` from the terminal.
+if __name__ == "__main__":
+    main()

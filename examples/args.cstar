@@ -1,7 +1,0 @@
-func calculate(x: float, y: float) -> float {
-    return x + y
-}
-
-# The Call:
-let result: float = calculate(10.5, 4.5)
-print(result)
