@@ -1,4 +1,0 @@
-let a: float = 10.5
-let b: float = 2.5
-let result: float = a + b
-print(result)

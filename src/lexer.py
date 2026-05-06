@@ -171,7 +171,7 @@ class Lexer:
                 return self.identifier()
 
             # MULTI-CHAR OPERATORS (highest priority)
-            if self.current_char in ("=", "!", ">", "<"):
+            if self.current_char in ("=", "!", ">", "<", "-"):
                 return self._handle_operators()
 
             # DOT (separate because of ambiguity with numbers)
@@ -217,6 +217,15 @@ class Lexer:
 
         char = self.current_char
         self.advance()
+
+        # =====================
+        # '-' or '->'
+        # =====================
+        if char == "-":
+            if self.current_char == ">":
+                self.advance()
+                return Token(TokenType.ARROW, "->", start_line, start_column)
+            return Token(TokenType.MINUS, "-", start_line, start_column)
 
         # =====================
         # '=' or '=='

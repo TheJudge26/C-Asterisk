@@ -1,10 +1,4 @@
-let weights: [int] = [2, 4, 6, 8, 10]
-let inputs: [int] = [1, 3, 5, 7, 9]
-
-let sum: int = 0
-
-for i in range(0, 5) {
-    sum = sum + weights[i] * inputs[i]
+let limit: int = 5
+for i in limit {
+    print(i)
 }
-
-print(sum) #Expected 190
