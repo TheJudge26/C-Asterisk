@@ -4,6 +4,7 @@ from parser import Parser
 from semantic import SemanticAnalyzer
 from codegen import LLVMCodeGenerator
 from visualizer import ASTPrinter # Ensure you have created visualizer.py!
+from errors import CompilerError, LexerError, ParserError, SemanticError
 
 def main():
     if len(sys.argv) < 2:
@@ -21,10 +22,16 @@ def main():
 
     print(f"--- Compiling {file_path} ---")
 
+    # Error Handling Wrapping
+
     # 1. Lexer
     print("1. Lexing...")
-    lexer = Lexer(source_code)
-    tokens = lexer.tokenize()
+    try:
+        lexer = Lexer(source_code)
+        tokens = lexer.tokenize()
+    except LexerError as e:
+        print(f"[Lexer Error] {e}")
+        sys.exit(1)
 
     # 2. Parser
     print("2. Parsing...")
@@ -32,32 +39,47 @@ def main():
         parser = Parser(tokens)
         ast = parser.parse()
         print("AST Generated Successfully")
-        
-        # --- NEW: AST Visualization ---
-        # This will show you the "Skeleton" of your code in the terminal
+
         print("\n--- ABSTRACT SYNTAX TREE (AST) ---")
         printer = ASTPrinter()
         printer.print_node(ast)
         print("----------------------------------\n")
-        
-    except Exception as e:
-        print(f"Parser Error: {e}")
+
+    except ParserError as e:
+        print(f"[Parser Error] {e}")
         sys.exit(1)
 
     # 3. Semantic Analysis
     print("3. Semantic Analysis...")
-    analyzer = SemanticAnalyzer()
-    analyzer.analyze(ast)
+    try:
+        analyzer = SemanticAnalyzer()
+        analyzer.analyze(ast)
+    except SemanticError as e:
+        print(f"[Semantic Error] {e}")
+        sys.exit(1)
 
-    # 4. LLVM Code Generation
+    if analyzer.errors.has_errors():
+        analyzer.errors.print_all()
+        print("Compilation failed.")
+        sys.exit(1)
+
+
+    # 4. Code Generation
     print("4. Generating LLVM IR...")
-    codegen = LLVMCodeGenerator()
-    codegen.generate(ast)
-    
-    # 5. Native Execution!
-    codegen.execute()
-    
-    print("Success! (Pipeline is completely wired up)")
+    try:
+        codegen = LLVMCodeGenerator()
+        codegen.generate(ast)
+    except CompilerError as e:
+        print(f"[Codegen Error] {e}")
+        sys.exit(1)
 
-if __name__ == "__main__":
-    main()
+    print("4. Generating LLVM IR done.")
+
+    # 5. Execution
+    try:
+        codegen.execute()
+    except Exception as e:
+        print(f"[Runtime Error] {e}")
+        sys.exit(1)
+
+    print("Success! (Pipeline is completely wired up)")

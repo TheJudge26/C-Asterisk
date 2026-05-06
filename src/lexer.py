@@ -1,5 +1,7 @@
 from tokens import Token, TokenType
+from errors import LexerError
 
+# Reserved keywords
 KEYWORDS = {
     "let": TokenType.LET,
     "print": TokenType.PRINT,
@@ -12,18 +14,44 @@ KEYWORDS = {
     "false": TokenType.FALSE,
     "for": TokenType.FOR,
     "in": TokenType.IN,
-    "class": TokenType.CLASS, # Added class
-    "import": TokenType.IMPORT, # Added import
+    "class": TokenType.CLASS,
+    "import": TokenType.IMPORT,
 }
+
+SINGLE_CHAR_TOKENS = {
+    "+": TokenType.PLUS,
+    "-": TokenType.MINUS,
+    "*": TokenType.MULTIPLY,
+    "/": TokenType.DIVIDE,
+    "(": TokenType.LPAREN,
+    ")": TokenType.RPAREN,
+    "{": TokenType.LBRACE,
+    "}": TokenType.RBRACE,
+    "[": TokenType.LBRACKET,
+    "]": TokenType.RBRACKET,
+    ":": TokenType.COLON,
+    ",": TokenType.COMMA,
+}
+
 
 class Lexer:
     def __init__(self, text):
         self.text = text
         self.position = 0
         self.current_char = self.text[self.position] if self.text else None
-        
+
+        self.line = 1
+        self.column = 1
+
     def advance(self):
+        if self.current_char == "\n":
+            self.line += 1
+            self.column = 1
+        else:
+            self.column += 1
+
         self.position += 1
+
         if self.position >= len(self.text):
             self.current_char = None
         else:
@@ -34,158 +62,210 @@ class Lexer:
             self.advance()
 
     def number(self):
-        result = ""
-        is_float = False
+        result = []
+        append = result.append
+        start_line = self.line
+        start_column = self.column
 
-        while self.current_char is not None and (self.current_char.isdigit() or self.current_char == "."):
+        dot_count = 0
+
+        while self.current_char is not None and (
+            self.current_char.isdigit() or self.current_char == "."
+        ):
             if self.current_char == ".":
-                if is_float:
-                    raise Exception("Invalid number format: too many decimal points")
-                is_float = True
-                
-            result += self.current_char
+                dot_count += 1
+                if dot_count > 1:
+                    raise LexerError(
+                        "Invalid number: multiple decimal points",
+                        self.line,
+                        self.column
+                    )
+
+            append(self.current_char)
             self.advance()
 
-        if is_float:
-            return Token(TokenType.FLOAT, float(result))
-        return Token(TokenType.NUMBER, int(result))
-    
+        value = "".join(result)
+
+        if value == ".":
+            raise LexerError("Invalid standalone '.'", start_line, start_column)
+
+        if value.startswith(".") or value.endswith("."):
+            raise LexerError("Invalid number format", start_line, start_column)
+
+        if value.count(".") > 1:
+            raise LexerError("Invalid number format", start_line, start_column)
+
+        if dot_count == 1:
+            return Token(TokenType.FLOAT, float(value), start_line, start_column)
+
+        return Token(TokenType.NUMBER, int(value), start_line, start_column)
+
+    # Cleaner and more optimized compilation
     def identifier(self):
-        result = ""
-        while self.current_char is not None and (self.current_char.isalnum() or self.current_char == "_"):
-            result += self.current_char
+        result = []
+
+        start_line = self.line
+        start_column = self.column
+
+        while self.current_char is not None and (
+            self.current_char.isalnum() or self.current_char == "_"
+        ):
+            result.append(self.current_char)
             self.advance()
-        
-        if result in KEYWORDS:
-            return Token(KEYWORDS[result], result)
-        
-        return Token(TokenType.IDENTIFIER, result)
 
-    # String Addition
-    
+        value = "".join(result)
+
+        if value in KEYWORDS:
+            return Token(KEYWORDS[value], value, start_line, start_column)
+
+        return Token(TokenType.IDENTIFIER, value, start_line, start_column)
+
+    # Cleaner and more optimized compilation
     def string(self):
-        result = ""
+        result = []
+        append = result.append
 
-        # Skip opening quote
-        self.advance()
+        self.advance()  # skip opening "
+
+        start_line = self.line
+        start_column = self.column
 
         while self.current_char is not None and self.current_char != '"':
-            result += self.current_char
+            append(self.current_char)
             self.advance()
 
         if self.current_char != '"':
-            raise Exception("Unterminated string literal")
+            raise LexerError("Unterminated string literal", self.line, self.column)
 
-        # Skip closing quote
-        self.advance()
+        self.advance()  # skip closing "
 
-        return Token(TokenType.STRING, result)
-    
+        value = "".join(result)
+
+        return Token(TokenType.STRING, value, start_line, start_column)
+
     def get_next_token(self):
+
         while self.current_char is not None:
 
+            # WHITESPACE (fast skip)
             if self.current_char.isspace():
                 self.skip_whitespace()
                 continue
 
-            # Check for comments
-            if self.current_char == '#':
-                while self.current_char is not None and self.current_char != '\n':
+            # COMMENTS
+            if self.current_char == "#":
+                while self.current_char is not None and self.current_char != "\n":
                     self.advance()
                 continue
 
+            # NUMBERS
             if self.current_char.isdigit():
                 return self.number()
-            
-            if self.current_char == ".": # Added Dot handeling
-                self.advance()
-                return Token(TokenType.DOT)
 
+            # STRINGS
             if self.current_char == '"':
                 return self.string()
-            
-            if self.current_char.isalpha():
+
+            # IDENTIFIERS / KEYWORDS
+            if self.current_char.isalpha() or self.current_char == "_":
                 return self.identifier()
-            
-            if self.current_char == "+":
+
+            # MULTI-CHAR OPERATORS (highest priority)
+            if self.current_char in ("=", "!", ">", "<"):
+                return self._handle_operators()
+
+            # DOT (separate because of ambiguity with numbers)
+            if self.current_char == ".":
+                start_line = self.line
+                start_column = self.column
+
+                next_char = self.text[self.position + 1] if self.position + 1 < len(self.text) else None
+
+                # CASE 1: ".2" → treat as float
+                if next_char is not None and next_char.isdigit():
+                    return self.number()
+
+                # CASE 2: "1." → invalid number format (important for LLVM stability)
+                prev_char = self.text[self.position - 1] if self.position > 0 else None
+                if prev_char is not None and prev_char.isdigit():
+                    raise LexerError("Invalid number format", start_line, start_column)
+
+                # CASE 3: standalone dot
                 self.advance()
-                return Token(TokenType.PLUS)
-            
-            if self.current_char == "-":
+                return Token(TokenType.DOT, ".", start_line, start_column)
+
+            # SINGLE CHAR TOKENS (FAST PATH)
+            if self.current_char in SINGLE_CHAR_TOKENS:
+                tok_type = SINGLE_CHAR_TOKENS[self.current_char]
+                start_line = self.line
+                start_column = self.column
+                value = self.current_char
                 self.advance()
-                if self.current_char == ">":
-                    self.advance()
-                    return Token(TokenType.ARROW)
-                return Token(TokenType.MINUS)
-            
-            if self.current_char == "*":
-                self.advance()
-                return Token(TokenType.MULTIPLY)
-            
-            if self.current_char == "/":
-                self.advance()
-                return Token(TokenType.DIVIDE)
-            
-            # UPDATED: Handles both = and ==
+                return Token(tok_type, value, start_line, start_column)
+
+            # ERROR
+            char = self.current_char
+            self.advance()
+            raise LexerError(f"Illegal character '{char}'", self.line, self.column)
+
+        return Token(TokenType.EOF, None, self.line, self.column)
+    
+    def _handle_operators(self):
+
+        start_line = self.line
+        start_column = self.column
+
+        char = self.current_char
+        self.advance()
+
+        # =====================
+        # '=' or '=='
+        # =====================
+        if char == "=":
             if self.current_char == "=":
                 self.advance()
-                if self.current_char == "=":
-                    self.advance()
-                    return Token(TokenType.EQUAL_EQUAL, "==")
-                return Token(TokenType.EQUAL, "=")
-            
-            if self.current_char == ">":
-                self.advance()
-                return Token(TokenType.GREATER, ">")
+                return Token(TokenType.EQUAL_EQUAL, "==", start_line, start_column)
+            return Token(TokenType.EQUAL, "=", start_line, start_column)
 
-            if self.current_char == "<":
+        # =====================
+        # '!' or '!='
+        # =====================
+        if char == "!":
+            if self.current_char == "=":
                 self.advance()
-                return Token(TokenType.LESS, "<")
+                return Token(TokenType.NOT_EQUAL, "!=", start_line, start_column)
+            raise LexerError("Unexpected '!'", self.line, self.column)
 
-            if self.current_char == "(":
+        # =====================
+        # '>' or '>='
+        # =====================
+        if char == ">":
+            if self.current_char == "=":
                 self.advance()
-                return Token(TokenType.LPAREN)
+                return Token(TokenType.GREATER_EQUAL, ">=", start_line, start_column)
+            return Token(TokenType.GREATER, ">", start_line, start_column)
 
-            if self.current_char == ")":
+        # =====================
+        # '<' or '<='
+        # =====================
+        if char == "<":
+            if self.current_char == "=":
                 self.advance()
-                return Token(TokenType.RPAREN)
-            
-            if self.current_char == "{":
-                self.advance()
-                return Token(TokenType.LBRACE)
+                return Token(TokenType.LESS_EQUAL, "<=", start_line, start_column)
+            return Token(TokenType.LESS, "<", start_line, start_column)
 
-            if self.current_char == "}":
-                self.advance()
-                return Token(TokenType.RBRACE)
-            
-            if self.current_char == ":":
-                self.advance()
-                return Token(TokenType.COLON)
-                
-            if self.current_char == ",":
-                self.advance()
-                return Token(TokenType.COMMA)
-                
-            if self.current_char == "[":
-                self.advance()
-                return Token(TokenType.LBRACKET)
-                
-            if self.current_char == "]":
-                self.advance()
-                return Token(TokenType.RBRACKET)
-            
-            # If we reach here, the character is unknown
-            char = self.current_char
-            self.advance() 
-            raise Exception(f"Illegal Character: {char}")
+        # fallback safety (should never happen)
+        raise LexerError(f"Unknown operator '{char}'", self.line, self.column)
 
-        return Token(TokenType.EOF)
-    
     def tokenize(self):
         tokens = []
+
         while True:
             token = self.get_next_token()
             tokens.append(token)
-            if token.type.name == "EOF":
+
+            if token.type == TokenType.EOF:
                 break
+
+
         return tokens
