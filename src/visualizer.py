@@ -59,7 +59,7 @@ class ASTPrinter:
 
         elif isinstance(node, ArrayIndex):
             # This handles recursive indexing like matrix[i][j]
-            self.print_node(node.name, label="Base", is_last=False)
+            self.print_node(node.array, label="Base", is_last=False)
             self.print_node(node.index, label="Index", is_last=True)
 
         elif isinstance(node, list): # For block bodies

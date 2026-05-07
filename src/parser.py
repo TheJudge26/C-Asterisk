@@ -498,29 +498,32 @@ class Parser:
         value = self.expression()
         return Assignment(name, value)
     
+   
+    def parse_type(self):
+        """Recursively parses types like int, float, [int], [[float]]."""
+        if self.current.type == TokenType.LBRACKET:
+            self.eat(TokenType.LBRACKET)
+            inner = self.parse_type()
+            self.eat(TokenType.RBRACKET)
+            return f"[{inner}]"
+        else:
+            val = self.current.value
+            self.eat(TokenType.IDENTIFIER)
+            return str(val)
+
+    
     def var_decl(self):
         """Parses a variable declaration: let name: type = value"""
         self.eat(TokenType.LET)
-        
-        # 1. Get the variable name
         name = self.current.value
         self.eat(TokenType.IDENTIFIER)
 
-        # 2. Get the type annotation (e.g., ': int' or ': [float]')
+        # Use our new recursive type parser!
         type_annotation = None
         if self.current.type == TokenType.COLON:
             self.eat(TokenType.COLON)
-            if self.current.type == TokenType.LBRACKET:
-                self.eat(TokenType.LBRACKET)
-                type_annotation = f"[{self.current.value}]"
-                self.eat(TokenType.IDENTIFIER)
-                self.eat(TokenType.RBRACKET)
-            else:
-                type_annotation = str(self.current.value)
-                self.eat(TokenType.IDENTIFIER)
+            type_annotation = self.parse_type()
 
-        # 3. Get the value
         self.eat(TokenType.EQUAL)
         value = self.expression()
-
         return VarDecl(name, type_annotation, value)

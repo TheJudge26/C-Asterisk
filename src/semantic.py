@@ -26,6 +26,9 @@ BUILTINS = {
     "print": "void",
     "len": "int",
     "exp": "float",
+    "sqrt": "float",  
+    "log": "float",   
+    "pow": "float",   
 }
 
 def normalize_type(t):
@@ -380,33 +383,7 @@ class SemanticAnalyzer:
         return None
         # -----------------------------------------------------
 
-        # Check if we are trying to build a Class Object
-        if node.name in self.classes:
-            class_info = self.classes[node.name]
-            ptr = self.builder.alloca(class_info["type"], name=f"new_{node.name}")
-            
-            for i, default_node in enumerate(class_info["defaults"]):
-                if default_node: 
-                    val = self.visit(default_node) 
-                    field_ptr = self.builder.gep(ptr, [self.i32(0), self.i32(i)], inbounds=True)
-                    self.builder.store(val, field_ptr) 
-            
-            return self.builder.load(ptr)
-
-        # Handle Built-in Math
-        if node.name == "exp":
-            arg = self.visit(node.args[0])
-            if arg.type != self.f64:
-                arg = self.builder.sitofp(arg, self.f64)
-            return self.builder.call(self.exp_func, [arg])
-
-        # Standard function calls
-        func = self.module.globals.get(node.name)
-        if func is None:
-            raise Exception(f"Undefined function {node.name}")
-
-        args = [self.visit(a) for a in node.args]
-        return self.builder.call(func, args)
+        
         
         
 

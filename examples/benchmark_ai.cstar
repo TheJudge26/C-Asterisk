@@ -1,29 +1,28 @@
 class NeuralNetwork {
-    # 1. The Data
     let inputs: [float] = [1.5, 2.0, -1.0]
     let weights: [float] = [0.5, -0.2, 0.1]
     let bias: float = 0.1
 
-    # 2. The Forward Pass
     func forward() -> float {
         let sum: float = self.bias
 
-        # Calculate the Dot Product
         for i in 3 {
             let in_val: float = self.inputs[i]
             let w_val: float = self.weights[i]
             sum = sum + (in_val * w_val)
         }
 
-        # 3. Sigmoid Activation Function: 1 / (1 + e^-x)
-        let sigmoid: float = 1.0 / (1.0 + exp(0.0 - sum))
-        
-        return sigmoid
+        return 1.0 / (1.0 + exp(0.0 - sum))
     }
 }
 
-# Run the AI!
 let ai = NeuralNetwork()
-let prediction: float = ai.forward()
+let limit: int = 1000000
+let prediction: float = 0.0
+
+# Run the Neural Network 1ml times
+for iter in limit {
+    prediction = ai.forward()
+}
 
 print(prediction)
