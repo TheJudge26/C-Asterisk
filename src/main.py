@@ -75,9 +75,29 @@ def main():
 
     print("4. Generating LLVM IR done.")
 
-    # 5. Execution
+    
+    # test too
+    # 5. Execution and Compilation
+    # 5. Execution and Compilation
     try:
+        # Run it in RAM (JIT)
         codegen.execute()
+        
+        # NEW: Save it to a dedicated 'obj' folder (AOT)
+        import os
+        
+        # 1. Safely create the 'obj' folder if it doesn't exist yet
+        os.makedirs("obj", exist_ok=True) 
+        
+        # 2. Extract the file name (e.g., 'speed_test' from 'examples/speed_test.cstar')
+        base_name = os.path.splitext(os.path.basename(file_path))[0]
+        
+        # 3. Route the output path into the folder
+        obj_path = os.path.join("obj", f"{base_name}.obj")
+        
+        # 4. Save the file!
+        codegen.save_object(obj_path)
+        
     except Exception as e:
         print(f"[Runtime Error] {e}")
         sys.exit(1)

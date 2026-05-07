@@ -32,6 +32,15 @@ class LLVMCodeGenerator:
         # Link the C math library 'exp' function
         exp_ty = ir.FunctionType(self.f64, [self.f64])
         self.exp_func = ir.Function(self.module, exp_ty, name="exp")
+        
+
+        # --- NEW: Link advanced AI Math ---
+        self.sqrt_func = ir.Function(self.module, exp_ty, name="sqrt")
+        self.log_func = ir.Function(self.module, exp_ty, name="log")
+        
+        pow_ty = ir.FunctionType(self.f64, [self.f64, self.f64])
+        self.pow_func = ir.Function(self.module, pow_ty, name="pow")
+        # ----------------------------------
 
     # =====================================================
     # CORE
@@ -312,11 +321,26 @@ class LLVMCodeGenerator:
             return ir.Constant(self.i32, length)
 
         # 4. Handle Built-in Math
-        if node.name == "exp":
+        if node.name in ["exp", "sqrt", "log"]:
             arg = self.visit(node.args[0])
             if arg.type != self.f64:
                 arg = self.builder.sitofp(arg, self.f64)
-            return self.builder.call(self.exp_func, [arg])
+                
+            if node.name == "exp":
+                return self.builder.call(self.exp_func, [arg])
+            elif node.name == "sqrt":
+                return self.builder.call(self.sqrt_func, [arg])
+            elif node.name == "log":
+                return self.builder.call(self.log_func, [arg])
+
+        if node.name == "pow":
+            base = self.visit(node.args[0])
+            exp_val = self.visit(node.args[1])
+            if base.type != self.f64:
+                base = self.builder.sitofp(base, self.f64)
+            if exp_val.type != self.f64:
+                exp_val = self.builder.sitofp(exp_val, self.f64)
+            return self.builder.call(self.pow_func, [base, exp_val])
 
         # 5. Standard function calls
         func = self.module.globals.get(node.name)
@@ -370,31 +394,33 @@ class LLVMCodeGenerator:
         self.builder.branch(cond_bb)
         self.builder.position_at_end(end_bb)
 
+    # =====================================================
+    # MULTI-DIMENSIONAL ARRAYS (MATRICES)
+    # =====================================================
+    def get_ptr(self, node):
+        """Recursively finds the exact memory address for variables, class fields, and chained array indices."""
+        if type(node).__name__ == "Variable":
+            return self.variables[node.name]
+            
+        elif type(node).__name__ == "MemberAccess":
+            obj_ptr = self.variables[node.object.name]
+            class_name = obj_ptr.type.pointee.name
+            field_idx = self.classes[class_name]["indices"][node.member]
+            return self.builder.gep(obj_ptr, [self.i32(0), self.i32(field_idx)], inbounds=True)
+            
+        elif type(node).__name__ == "ArrayIndex":
+            # RECURSIVE MAGIC: Get the pointer of the array itself first (handles matrix[i][j])
+            base_ptr = self.get_ptr(node.array)
+            idx = self.visit(node.index)
+            return self.builder.gep(base_ptr, [self.i32(0), idx], inbounds=True)
+            
+        raise Exception(f"Cannot get pointer for {type(node).__name__}")
+
     def visit_ArrayIndex(self, node):
         """Pulls a value out of an array at a specific index."""
-        
-        # 1. Figure out where the array is stored in memory
-        if type(node.array).__name__ == "Variable":
-            # It's a standard local variable (e.g., inputs[i])
-            base_ptr = self.variables[node.array.name]
-            
-        elif type(node.array).__name__ == "MemberAccess":
-            # It's an array inside a class! (e.g., self.inputs[i])
-            obj_ptr = self.variables[node.array.object.name]
-            class_name = obj_ptr.type.pointee.name
-            field_idx = self.classes[class_name]["indices"][node.array.member]
-            # Jump to the array's exact slot inside the struct
-            base_ptr = self.builder.gep(obj_ptr, [self.i32(0), self.i32(field_idx)], inbounds=True)
-            
-        else:
-            raise Exception("Unsupported array base in ArrayIndex")
-
-        # 2. Evaluate the index (e.g., 'i' in inputs[i])
-        idx = self.visit(node.index)
-
-        # 3. Calculate the exact memory pointer and load the value
-        ptr = self.builder.gep(base_ptr, [self.i32(0), idx], inbounds=True)
-        return self.builder.load(ptr)     
+        # Use our new smart pointer fetcher!
+        ptr = self.get_ptr(node)
+        return self.builder.load(ptr) 
 
 
     def visit_ClassDecl(self, node):
@@ -522,11 +548,42 @@ class LLVMCodeGenerator:
             
             # 4. Cast to a C-style function and call it
             from ctypes import CFUNCTYPE, c_int
+            import time  # <-- NEW: Import the time tracker
+            
             cfunc = CFUNCTYPE(c_int)(func_ptr)
             
             print("\n--- Running Program ---")
+            
+            # <-- NEW: Start the clock right before the CPU executes the machine code!
+            start_time = time.time() 
+            
             result = cfunc()
+            
+            # <-- NEW: Stop the clock!
+            end_time = time.time() 
+            
             print(f"--- Program Exited with code {result} ---")
+            print(f".cstar took: {end_time - start_time:.6f} seconds")
             return result
-        
     
+    # testing somethings 
+
+    def save_object(self, filename):
+        """Compiles the LLVM IR down to a native Object File (.obj / .o)."""
+        # 1. Parse the IR
+        llvm_ir = str(self.module)
+        mod = llvm.parse_assembly(llvm_ir)
+        mod.verify()
+
+        # 2. Get the CPU architecture (Windows, Mac, or Linux)
+        target = llvm.Target.from_default_triple()
+        target_machine = target.create_target_machine()
+
+        # 3. Translate LLVM IR into raw binary machine code for this specific CPU
+        obj_code = target_machine.emit_object(mod)
+
+        # 4. Save the binary to the hard drive
+        with open(filename, "wb") as f:
+            f.write(obj_code)
+            
+        print(f"Native Object File saved to: {filename}")
