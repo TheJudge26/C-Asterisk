@@ -77,7 +77,7 @@ def main():
     print("4. Generating LLVM IR done.")
 
     
-     #test too
+    #test too
     # 5. Execution and Compilation
     try:
         # --- NEW: Load the C Standard Library ---
