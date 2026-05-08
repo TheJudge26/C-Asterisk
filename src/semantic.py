@@ -29,6 +29,7 @@ BUILTINS = {
     "sqrt": "float",  
     "log": "float",   
     "pow": "float",   
+    "load_csv": "[float]",
 }
 
 def normalize_type(t):
@@ -223,7 +224,11 @@ class SemanticAnalyzer:
     # ASSIGNMENT
     # -----------------------------
     def visit_assignment(self, node):
-        var_type = normalize_type(self.symbol_table.lookup(node.name))
+        if getattr(node, "target", None):
+            var_type = self.visit(node.target) 
+        else:
+            var_type = normalize_type(self.symbol_table.lookup(node.name))
+            
         value_type = self.visit(node.value)
 
         if var_type != value_type:

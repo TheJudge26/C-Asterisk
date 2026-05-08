@@ -1,4 +1,5 @@
 import sys
+import os
 from lexer import Lexer
 from parser import Parser
 from semantic import SemanticAnalyzer
@@ -76,15 +77,26 @@ def main():
     print("4. Generating LLVM IR done.")
 
     
-    # test too
-    # 5. Execution and Compilation
+     #test too
     # 5. Execution and Compilation
     try:
+        # --- NEW: Load the C Standard Library ---
+        import llvmlite.binding as llvm
+        
+        
+        # Point LLVM to your compiled C code
+        dll_path = os.path.join(os.path.dirname(__file__), "lib_io.dll")
+        llvm.load_library_permanently(dll_path)
+        # ----------------------------------------
+
+    
         # Run it in RAM (JIT)
         codegen.execute()
         
         # NEW: Save it to a dedicated 'obj' folder (AOT)
-        import os
+        
+
+        
         
         # 1. Safely create the 'obj' folder if it doesn't exist yet
         os.makedirs("obj", exist_ok=True) 
@@ -97,6 +109,8 @@ def main():
         
         # 4. Save the file!
         codegen.save_object(obj_path)
+
+    
         
     except Exception as e:
         print(f"[Runtime Error] {e}")
