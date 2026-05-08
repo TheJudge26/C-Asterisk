@@ -439,10 +439,19 @@ class LLVMCodeGenerator:
                 elif member.type_annotation == "int":
                     ll_type = self.i32
                 elif type(member.value).__name__ == "ArrayLiteral":
-                    # --- NEW: Calculate exact array size for the struct! ---
-                    size = len(member.value.elements)
-                    inner_type = self.f64 if "float" in member.type_annotation else self.i32
-                    ll_type = ir.ArrayType(inner_type, size)
+                    base_type = self.f64 if "float" in member.type_annotation else self.i32
+                    
+                    # Dig down to find all dimensions (e.g., 3x3)
+                    dims = []
+                    curr = member.value
+                    while type(curr).__name__ == "ArrayLiteral":
+                        dims.append(len(curr.elements))
+                        curr = curr.elements[0] if len(curr.elements) > 0 else None
+                        
+                    # Build the LLVM memory type from the inside out
+                    ll_type = base_type
+                    for d in reversed(dims):
+                        ll_type = ir.ArrayType(ll_type, d)
                     # -------------------------------------------------------
                 else:
                     ll_type = self.i8_ptr 
