@@ -32,6 +32,10 @@ class LLVMCodeGenerator:
         # Link the C math library 'exp' function
         exp_ty = ir.FunctionType(self.f64, [self.f64])
         self.exp_func = ir.Function(self.module, exp_ty, name="exp")
+        # --- the C Standard Library ---
+        # The C function takes a string (char*) and an integer (int), and returns a float pointer (double*)
+        csv_ty = ir.FunctionType(self.f64.as_pointer(), [self.i8_ptr, self.i32])
+        self.load_csv_func = ir.Function(self.module, csv_ty, name="load_csv_native")
         
 
         # --- NEW: Link advanced AI Math ---
@@ -108,9 +112,14 @@ class LLVMCodeGenerator:
         self.builder.store(val, ptr)
 
     def visit_Assignment(self, node):
-        if node.name not in self.variables:
-            raise Exception(f"Undefined variable {node.name}")
-        ptr = self.variables[node.name]
+        if getattr(node, "target", None):
+            # Advanced Memory Overwrite (e.g. array[i] = x)
+            ptr = self.get_ptr(node.target)
+        else:
+            # Standard Variable Overwrite (e.g. x = 5)
+            if node.name not in self.variables:
+                raise Exception(f"Undefined variable {node.name}")
+            ptr = self.variables[node.name]
         val = self.visit(node.value)
         self.builder.store(val, ptr)
 
@@ -118,6 +127,9 @@ class LLVMCodeGenerator:
         if node.name not in self.variables:
             raise Exception(f"Undefined variable {node.name}")
         return self.builder.load(self.variables[node.name])
+    
+    def visit_ExpressionStatement(self, node):
+        return self.visit(node.expression)
 
     # =====================================================
     # BINARY OPERATIONS
@@ -295,6 +307,12 @@ class LLVMCodeGenerator:
             
             args = [obj_ptr] + [self.visit(a) for a in node.args]
             return self.builder.call(func, args)
+        
+        # Handle load_csv built-in function
+        if node.name == "load_csv":
+            filename = self.visit(node.args[0])
+            num_values = self.visit(node.args[1])
+            return self.builder.call(self.load_csv_func, [filename, num_values])
 
         # 2. Check if we are trying to build a Class Object
         if node.name in self.classes:
@@ -305,6 +323,17 @@ class LLVMCodeGenerator:
                 if default_node: 
                     val = self.visit(default_node) 
                     field_ptr = self.builder.gep(ptr, [self.i32(0), self.i32(i)], inbounds=True)
+                    
+                    # --- THE FIX: Array-to-Pointer Decay ---
+                    # If we have a massive Array Literal but the class expects a tiny Pointer
+                    if isinstance(val.type, ir.ArrayType) and isinstance(field_ptr.type.pointee, ir.PointerType):
+                        # Put the massive array on the floor (in memory)
+                        temp_arr = self.builder.alloca(val.type)
+                        self.builder.store(val, temp_arr)
+                        # Hand the class a pointer to the first item!
+                        val = self.builder.bitcast(temp_arr, field_ptr.type.pointee)
+                    # ---------------------------------------
+                    
                     self.builder.store(val, field_ptr) 
             
             return self.builder.load(ptr)
@@ -349,6 +378,8 @@ class LLVMCodeGenerator:
 
         args = [self.visit(a) for a in node.args]
         return self.builder.call(func, args)
+    
+    
 
     # =====================================================
     # MEMBER ACCESS (RESTORED)
@@ -409,10 +440,18 @@ class LLVMCodeGenerator:
             return self.builder.gep(obj_ptr, [self.i32(0), self.i32(field_idx)], inbounds=True)
             
         elif type(node).__name__ == "ArrayIndex":
-            # RECURSIVE MAGIC: Get the pointer of the array itself first (handles matrix[i][j])
             base_ptr = self.get_ptr(node.array)
             idx = self.visit(node.index)
-            return self.builder.gep(base_ptr, [self.i32(0), idx], inbounds=True)
+            
+            # --- Smart Memory Routing ---
+            # If the pointer is a dynamic C-pointer (like from load_csv)
+            if isinstance(base_ptr.type.pointee, ir.PointerType):
+                actual_ptr = self.builder.load(base_ptr)
+                return self.builder.gep(actual_ptr, [idx], inbounds=True)
+            else:
+                # If it's a static LLVM array
+                return self.builder.gep(base_ptr, [self.i32(0), idx], inbounds=True)
+            # --------------------------------------
             
         raise Exception(f"Cannot get pointer for {type(node).__name__}")
 
@@ -449,9 +488,19 @@ class LLVMCodeGenerator:
                         curr = curr.elements[0] if len(curr.elements) > 0 else None
                         
                     # Build the LLVM memory type from the inside out
-                    ll_type = base_type
-                    for d in reversed(dims):
-                        ll_type = ir.ArrayType(ll_type, d)
+                    if type(member).__name__ == "VarDecl":
+                      if member.type_annotation == "float":
+                       ll_type = self.f64
+                elif member.type_annotation == "int":
+                    ll_type = self.i32
+                
+                # --- NEW: Tell the class how to handle dynamic arrays! ---
+                elif member.type_annotation == "[float]":
+                    ll_type = self.f64.as_pointer()
+                # ---------------------------------------------------------
+                
+                elif type(member.value).__name__ == "ArrayLiteral":
+                    base_type = self.f64 if "float" in member.type_annotation else self.i32
                     # -------------------------------------------------------
                 else:
                     ll_type = self.i8_ptr 
@@ -529,6 +578,12 @@ class LLVMCodeGenerator:
 
         elem_ty = elements[0].type
         arr_ty = ir.ArrayType(elem_ty, len(elements))
+
+        # --- THE LLVM MEMORY OPTIMIZATION FIX ---
+        # If the array is purely raw numbers (like our massive CSV dataset),
+        # we skip the 40,000 store instructions and package it instantly!
+        if all(isinstance(val, ir.Constant) for val in elements):
+            return ir.Constant(arr_ty, elements)
         
         # Build array dynamically on the stack 
         tmp_ptr = self.builder.alloca(arr_ty, name="arr_literal_tmp")
@@ -547,28 +602,33 @@ class LLVMCodeGenerator:
         mod = llvm.parse_assembly(llvm_ir)
         mod.verify()
 
-        # 2. Setup the execution engine
+        # 2. Setup the CPU Target Machine
         target_machine = llvm.Target.from_default_triple().create_target_machine()
+
+        # --- NEW: THE TURBO BUTTON (Modern LLVM Pass Manager) ---
+        pto = llvm.create_pipeline_tuning_options(speed_level=3) # Level 3 Speed!
+        pb = llvm.create_pass_builder(target_machine, pto)
+        pm = pb.getModulePassManager()
+        pm.run(mod, pb)
+        # --------------------------------------------------------
+
+        # 3. Setup the execution engine
         with llvm.create_mcjit_compiler(mod, target_machine) as ee:
             ee.finalize_object()
             
-            # 3. Find the 'main' function address
+            # 4. Find the 'main' function address
             func_ptr = ee.get_function_address("main")
             
-            # 4. Cast to a C-style function and call it
+            # 5. Cast to a C-style function and call it
             from ctypes import CFUNCTYPE, c_int
-            import time  # <-- NEW: Import the time tracker
+            import time  
             
             cfunc = CFUNCTYPE(c_int)(func_ptr)
             
             print("\n--- Running Program ---")
             
-            # <-- NEW: Start the clock right before the CPU executes the machine code!
             start_time = time.time() 
-            
             result = cfunc()
-            
-            # <-- NEW: Stop the clock!
             end_time = time.time() 
             
             print(f"--- Program Exited with code {result} ---")

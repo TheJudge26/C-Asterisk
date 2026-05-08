@@ -1,0 +1,11 @@
+print(9999.0) # Start Flag
+
+# Call your new Standard Library! 
+# Tell it the filename, and how many numbers to read.
+let my_data: [float] = load_csv("examples/test_data.csv", 5)
+
+print(my_data[0]) # Should print 10.5
+print(my_data[1]) # Should print 20.5
+print(my_data[4]) # Should print 50.5
+
+print(1111.0) # Finish Flag

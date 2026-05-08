@@ -65,9 +65,10 @@ class VarDecl(AST):
 
 
 class Assignment(AST):
-    def __init__(self, name, value):
+    def __init__(self, name, value, target=None):
         self.name = name
         self.value = value
+        self.target = target 
 
 
 class Print(AST):
@@ -230,19 +231,25 @@ class Parser:
         elif self.current.type == TokenType.IMPORT:
             return self.import_stmt()
         elif self.current.type == TokenType.IDENTIFIER:
-            if self.peek() and self.peek().type == TokenType.EQUAL:
-                return self.assignment()
-            else:
-                expr = self.expression()
-                if isinstance(expr, Variable):
-                    return expr
-                return ExpressionStatement(expr)
-        else:
-            raise ParserError(
-                f"Unexpected statement {self.current.type}",
-                self.current.line,
-                self.current.column
-            )
+            # 1. Parse the left side (could be 'x', 'arr[i]', or 'obj.field')
+            target = self.expression()
+            
+            # 2. Check if an '=' comes next (Memory Overwrite!)
+            if self.current.type == TokenType.EQUAL:
+                self.eat(TokenType.EQUAL)
+                value = self.expression()
+                
+                # If it's a simple variable (x = 5)
+                if type(target).__name__ == "Variable":
+                    return Assignment(target.name, value)
+                
+                # If it's an array or object field (arr[i] = 5)
+                return Assignment("memory_overwrite", value, target=target)
+
+            if isinstance(target, Variable):
+                return target
+            return ExpressionStatement(target)
+            
 
 
     def print_stmt(self):
