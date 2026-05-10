@@ -120,7 +120,7 @@ class Lexer:
 
         return Token(TokenType.IDENTIFIER, value, start_line, start_column)
 
-    # Cleaner and more optimized compilation
+    
     def string(self):
         result = []
         append = result.append
@@ -137,7 +137,7 @@ class Lexer:
         if self.current_char != '"':
             raise LexerError("Unterminated string literal", self.line, self.column)
 
-        self.advance()  # skip closing "
+        self.advance()  
 
         value = "".join(result)
 
@@ -147,7 +147,7 @@ class Lexer:
 
         while self.current_char is not None:
 
-            # WHITESPACE (fast skip)
+            
             if self.current_char.isspace():
                 self.skip_whitespace()
                 continue

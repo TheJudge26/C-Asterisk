@@ -4,7 +4,7 @@ from lexer import Lexer
 from parser import Parser
 from semantic import SemanticAnalyzer
 from codegen import LLVMCodeGenerator
-from visualizer import ASTPrinter # Ensure you have created visualizer.py!
+from visualizer import ASTPrinter 
 from errors import CompilerError, LexerError, ParserError, SemanticError
 
 def main():
@@ -23,7 +23,7 @@ def main():
 
     print(f"--- Compiling {file_path} ---")
 
-    # Error Handling Wrapping
+    
 
     # 1. Lexer
     print("1. Lexing...")
@@ -80,24 +80,15 @@ def main():
     #test too
     # 5. Execution and Compilation
     try:
-        # --- NEW: Load the C Standard Library ---
+        
         import llvmlite.binding as llvm
         
-        
-        # Point LLVM to your compiled C code
         dll_path = os.path.join(os.path.dirname(__file__), "lib_io.dll")
         llvm.load_library_permanently(dll_path)
-        # ----------------------------------------
-
-    
-        # Run it in RAM (JIT)
+        
         codegen.execute()
         
-        # NEW: Save it to a dedicated 'obj' folder (AOT)
-        
 
-        
-        
         # 1. Safely create the 'obj' folder if it doesn't exist yet
         os.makedirs("obj", exist_ok=True) 
         
@@ -118,7 +109,4 @@ def main():
 
     print("Success! (Pipeline is completely wired up)")
 
-# CRITICAL FIX: This tells Python to actually execute the main() function 
-# when you run `python src/main.py` from the terminal.
-if __name__ == "__main__":
     main()

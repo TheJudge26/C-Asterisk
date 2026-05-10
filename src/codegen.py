@@ -26,25 +26,23 @@ class LLVMCodeGenerator:
         self.f64 = ir.DoubleType()
         self.i8_ptr = ir.IntType(8).as_pointer()
 
-        # printf
         printf_ty = ir.FunctionType(self.i32, [self.i8_ptr], var_arg=True)
         self.printf = ir.Function(self.module, printf_ty, name="printf")
         # Link the C math library 'exp' function
         exp_ty = ir.FunctionType(self.f64, [self.f64])
         self.exp_func = ir.Function(self.module, exp_ty, name="exp")
-        # --- the C Standard Library ---
+    
         # The C function takes a string (char*) and an integer (int), and returns a float pointer (double*)
         csv_ty = ir.FunctionType(self.f64.as_pointer(), [self.i8_ptr, self.i32])
         self.load_csv_func = ir.Function(self.module, csv_ty, name="load_csv_native")
         
 
-        # --- NEW: Link advanced AI Math ---
         self.sqrt_func = ir.Function(self.module, exp_ty, name="sqrt")
         self.log_func = ir.Function(self.module, exp_ty, name="log")
         
         pow_ty = ir.FunctionType(self.f64, [self.f64, self.f64])
         self.pow_func = ir.Function(self.module, pow_ty, name="pow")
-        # ----------------------------------
+        
 
     # =====================================================
     # CORE
@@ -101,22 +99,22 @@ class LLVMCodeGenerator:
 
         return self.builder.gep(glob, [self.i32(0), self.i32(0)])
 
-    # =====================================================
-    # VARIABLES (FIXED FOR FLOATS AND ARRAYS)
-    # =====================================================
+    # ============
+    # VARIABLES 
+    # =========
     def visit_VarDecl(self, node):
         val = self.visit(node.value)
-        # Allocate memory based on the ACTUAL type of the value
+        # allocate memory based on the ACTUAL type of the value
         ptr = self.builder.alloca(val.type, name=node.name)
         self.variables[node.name] = ptr
         self.builder.store(val, ptr)
 
     def visit_Assignment(self, node):
         if getattr(node, "target", None):
-            # Advanced Memory Overwrite (e.g. array[i] = x)
+        
             ptr = self.get_ptr(node.target)
         else:
-            # Standard Variable Overwrite (e.g. x = 5)
+            
             if node.name not in self.variables:
                 raise Exception(f"Undefined variable {node.name}")
             ptr = self.variables[node.name]
@@ -170,9 +168,9 @@ class LLVMCodeGenerator:
 
             return self.builder.zext(cmp, self.i32)
 
-    # =====================================================
+    # =====
     # PRINT
-    # =====================================================
+    # =========
     def visit_Print(self, node):
         val = self.visit(node.value)
 
@@ -196,9 +194,9 @@ class LLVMCodeGenerator:
 
         return self.builder.gep(glob, [self.i32(0), self.i32(0)])
 
-    # =====================================================
+    # ============
     # CONTROL FLOW
-    # =====================================================
+    # ==============
     def visit_If(self, node):
         cond = self.visit(node.condition)
         cond = self.builder.icmp_signed("!=", cond, self.i32(0))
@@ -243,19 +241,19 @@ class LLVMCodeGenerator:
 
         self.builder.position_at_end(end_bb)
 
-    # =====================================================
-    # FUNCTIONS (FIXED PARAMETERS & SELF BINDING)
-    # =====================================================
+    # =============
+    # FUNCTIONS 
+    # =============
     def visit_Function(self, node):
         ret_ty = self.f64 if node.return_type == "float" else self.i32
 
-        # Dynamically determine parameter types
+        # dynamically determine parameter types
         param_types = []
         for p in node.params:
             if p["type"] == "float":
                 param_types.append(self.f64)
             elif p["type"] in self.classes:
-                # Class Objects become Struct Pointers
+                
                 param_types.append(self.classes[p["type"]]["type"].as_pointer())
             else:
                 param_types.append(self.i32)
@@ -272,7 +270,7 @@ class LLVMCodeGenerator:
 
         for i, p in enumerate(node.params):
             if p["name"] == "self":
-                # Secretly bind 'self' directly to memory so obj.field works inside methods!
+                
                 self.variables[p["name"]] = func.args[i]
             else:
                 ptr = self.builder.alloca(param_types[i], name=p["name"])
@@ -293,7 +291,7 @@ class LLVMCodeGenerator:
 
 
 # =====================================================
-    # CALLS (RESTORED WITH LEN & METHODS)
+    # CALLS (LEN & METHODS)
     # =====================================================
     def visit_Call(self, node):
         
@@ -308,13 +306,12 @@ class LLVMCodeGenerator:
             args = [obj_ptr] + [self.visit(a) for a in node.args]
             return self.builder.call(func, args)
         
-        # Handle load_csv built-in function
+        # handle load_csv built-in function
         if node.name == "load_csv":
             filename = self.visit(node.args[0])
             num_values = self.visit(node.args[1])
             return self.builder.call(self.load_csv_func, [filename, num_values])
 
-        # 2. Check if we are trying to build a Class Object
         if node.name in self.classes:
             class_info = self.classes[node.name]
             ptr = self.builder.alloca(class_info["type"], name=f"new_{node.name}")
@@ -324,21 +321,20 @@ class LLVMCodeGenerator:
                     val = self.visit(default_node) 
                     field_ptr = self.builder.gep(ptr, [self.i32(0), self.i32(i)], inbounds=True)
                     
-                    # --- THE FIX: Array-to-Pointer Decay ---
-                    # If we have a massive Array Literal but the class expects a tiny Pointer
+                    
                     if isinstance(val.type, ir.ArrayType) and isinstance(field_ptr.type.pointee, ir.PointerType):
-                        # Put the massive array on the floor (in memory)
+                        
                         temp_arr = self.builder.alloca(val.type)
                         self.builder.store(val, temp_arr)
-                        # Hand the class a pointer to the first item!
+                        
                         val = self.builder.bitcast(temp_arr, field_ptr.type.pointee)
-                    # ---------------------------------------
+                    
                     
                     self.builder.store(val, field_ptr) 
             
             return self.builder.load(ptr)
 
-        # 3. Handle built-in len() function
+        
         if node.name == "len":
             arg = self.visit(node.args[0])
             if isinstance(arg.type, ir.ArrayType):
@@ -349,7 +345,7 @@ class LLVMCodeGenerator:
                 length = 0 
             return ir.Constant(self.i32, length)
 
-        # 4. Handle Built-in Math
+        
         if node.name in ["exp", "sqrt", "log"]:
             arg = self.visit(node.args[0])
             if arg.type != self.f64:
@@ -371,7 +367,7 @@ class LLVMCodeGenerator:
                 exp_val = self.builder.sitofp(exp_val, self.f64)
             return self.builder.call(self.pow_func, [base, exp_val])
 
-        # 5. Standard function calls
+        
         func = self.module.globals.get(node.name)
         if func is None:
             raise Exception(f"Undefined function {node.name}")
@@ -381,9 +377,9 @@ class LLVMCodeGenerator:
     
     
 
-    # =====================================================
-    # MEMBER ACCESS (RESTORED)
-    # =====================================================
+    # ===============
+    # MEMBER ACCESS
+    # ===============
     def visit_MemberAccess(self, node):
         """Pulls a specific field out of an object (e.g. obj.field)."""
         obj_ptr = self.variables[node.object.name]
@@ -394,17 +390,17 @@ class LLVMCodeGenerator:
         ptr = self.builder.gep(obj_ptr, [self.i32(0), self.i32(field_idx)], inbounds=True)
         return self.builder.load(ptr)
 
-    # =====================================================
-    # FOR LOOPS (PRESERVED + FIXED SAFETY)
-    # =====================================================
-    # 1. Update visit_For to be dynamic[cite: 2]
+    # ==========
+    # FOR LOOPS 
+    # ==========
+    
     def visit_For(self, node):
         limit_val = self.visit(node.iterable) 
         start = ir.Constant(self.i32, 0)
         i_ptr = self.builder.alloca(self.i32, name=node.var)
         self.builder.store(start, i_ptr)
 
-        self.variables[node.var] = i_ptr # Register loop variable
+        self.variables[node.var] = i_ptr # register loop variable
 
         cond_bb = self.builder.append_basic_block("for.cond")
         body_bb = self.builder.append_basic_block("for.body")
@@ -425,9 +421,9 @@ class LLVMCodeGenerator:
         self.builder.branch(cond_bb)
         self.builder.position_at_end(end_bb)
 
-    # =====================================================
-    # MULTI-DIMENSIONAL ARRAYS (MATRICES)
-    # =====================================================
+    # ============================
+    # MULTI-DIMENSIONAL ARRAYS 
+    # ===========================
     def get_ptr(self, node):
         """Recursively finds the exact memory address for variables, class fields, and chained array indices."""
         if type(node).__name__ == "Variable":
@@ -443,21 +439,20 @@ class LLVMCodeGenerator:
             base_ptr = self.get_ptr(node.array)
             idx = self.visit(node.index)
             
-            # --- Smart Memory Routing ---
-            # If the pointer is a dynamic C-pointer (like from load_csv)
+            
             if isinstance(base_ptr.type.pointee, ir.PointerType):
                 actual_ptr = self.builder.load(base_ptr)
                 return self.builder.gep(actual_ptr, [idx], inbounds=True)
             else:
-                # If it's a static LLVM array
+                
                 return self.builder.gep(base_ptr, [self.i32(0), idx], inbounds=True)
-            # --------------------------------------
+            
             
         raise Exception(f"Cannot get pointer for {type(node).__name__}")
 
     def visit_ArrayIndex(self, node):
         """Pulls a value out of an array at a specific index."""
-        # Use our new smart pointer fetcher!
+       
         ptr = self.get_ptr(node)
         return self.builder.load(ptr) 
 
@@ -480,28 +475,28 @@ class LLVMCodeGenerator:
                 elif type(member.value).__name__ == "ArrayLiteral":
                     base_type = self.f64 if "float" in member.type_annotation else self.i32
                     
-                    # Dig down to find all dimensions (e.g., 3x3)
+                    
                     dims = []
                     curr = member.value
                     while type(curr).__name__ == "ArrayLiteral":
                         dims.append(len(curr.elements))
                         curr = curr.elements[0] if len(curr.elements) > 0 else None
                         
-                    # Build the LLVM memory type from the inside out
+                    
                     if type(member).__name__ == "VarDecl":
                       if member.type_annotation == "float":
                        ll_type = self.f64
                 elif member.type_annotation == "int":
                     ll_type = self.i32
                 
-                # --- NEW: Tell the class how to handle dynamic arrays! ---
+                
                 elif member.type_annotation == "[float]":
                     ll_type = self.f64.as_pointer()
-                # ---------------------------------------------------------
+                
                 
                 elif type(member.value).__name__ == "ArrayLiteral":
                     base_type = self.f64 if "float" in member.type_annotation else self.i32
-                    # -------------------------------------------------------
+                    
                 else:
                     ll_type = self.i8_ptr 
                 
@@ -518,38 +513,38 @@ class LLVMCodeGenerator:
             "defaults": field_defaults 
         }
 
-        # 1. Save the current builder so we can return to 'main' later
+        
         old_builder = self.builder
         
-        # 2. Compile each method
+        
         for member in node.body:
             if type(member).__name__ == "Function":
-                # Rename the function to ClassName_methodName in machine code
+                
                 member.name = f"{node.name}_{member.name}"
-                # Use standard dynamic visit
+                
                 self.visit(member) 
                 
-        # 3. Restore the builder so 'main' can finish compiling
+        
         self.builder = old_builder
-        # ----------------------------------------------------------
+        
 
     def visit_MemberAccess(self, node):
         """Pulls a specific field out of an object (e.g. obj.field)."""
-        # 1. Get the memory address of the object itself
+        
         obj_ptr = self.variables[node.object.name]
         
-        # 2. Extract the name of the class (Struct) from the LLVM pointer
+        
         class_name = obj_ptr.type.pointee.name
         
-        # 3. Look up which index (0, 1, 2...) this field is located at
+        
         field_idx = self.classes[class_name]["indices"][node.member]
         
-        # 4. Jump to that exact memory slot and load the value
+        
         ptr = self.builder.gep(obj_ptr, [self.i32(0), self.i32(field_idx)], inbounds=True)
         return self.builder.load(ptr)
 
     
-    # 2. Add this execution method at the end of the class[cite: 2]
+    
     def execute(self):
         llvm_ir = str(self.module)
         mod = llvm.parse_assembly(llvm_ir)
@@ -579,9 +574,9 @@ class LLVMCodeGenerator:
         elem_ty = elements[0].type
         arr_ty = ir.ArrayType(elem_ty, len(elements))
 
-        # --- THE LLVM MEMORY OPTIMIZATION FIX ---
-        # If the array is purely raw numbers (like our massive CSV dataset),
-        # we skip the 40,000 store instructions and package it instantly!
+        # --- THE LLVM MEMORY OPTIMIZATION  ---
+        # If the array is purely raw numbers (like our massive CSV dataset)
+        # we skip the 40,000 store instructions and package it instantly
         if all(isinstance(val, ir.Constant) for val in elements):
             return ir.Constant(arr_ty, elements)
         
@@ -597,29 +592,29 @@ class LLVMCodeGenerator:
     
     def execute(self):
         """Compiles the IR and runs the main function."""
-        # 1. Parse the IR string into an LLVM module
+        
         llvm_ir = str(self.module)
         mod = llvm.parse_assembly(llvm_ir)
         mod.verify()
 
-        # 2. Setup the CPU Target Machine
+        
         target_machine = llvm.Target.from_default_triple().create_target_machine()
 
-        # --- NEW: THE TURBO BUTTON (Modern LLVM Pass Manager) ---
-        pto = llvm.create_pipeline_tuning_options(speed_level=3) # Level 3 Speed!
+        
+        pto = llvm.create_pipeline_tuning_options(speed_level=3)
         pb = llvm.create_pass_builder(target_machine, pto)
         pm = pb.getModulePassManager()
         pm.run(mod, pb)
-        # --------------------------------------------------------
+        
 
-        # 3. Setup the execution engine
+        
         with llvm.create_mcjit_compiler(mod, target_machine) as ee:
             ee.finalize_object()
             
-            # 4. Find the 'main' function address
+            
             func_ptr = ee.get_function_address("main")
             
-            # 5. Cast to a C-style function and call it
+           
             from ctypes import CFUNCTYPE, c_int
             import time  
             
@@ -635,23 +630,21 @@ class LLVMCodeGenerator:
             print(f".cstar took: {end_time - start_time:.6f} seconds")
             return result
     
-    # testing somethings 
+    #testing something 
 
     def save_object(self, filename):
         """Compiles the LLVM IR down to a native Object File (.obj / .o)."""
-        # 1. Parse the IR
+        
         llvm_ir = str(self.module)
         mod = llvm.parse_assembly(llvm_ir)
         mod.verify()
-
-        # 2. Get the CPU architecture (Windows, Mac, or Linux)
+        
         target = llvm.Target.from_default_triple()
         target_machine = target.create_target_machine()
 
-        # 3. Translate LLVM IR into raw binary machine code for this specific CPU
+    
         obj_code = target_machine.emit_object(mod)
 
-        # 4. Save the binary to the hard drive
         with open(filename, "wb") as f:
             f.write(obj_code)
             

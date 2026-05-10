@@ -5,50 +5,39 @@ class TokenType(Enum):
     IDENTIFIER = "IDENTIFIER"
     NUMBER = "NUMBER"
     FLOAT = "FLOAT"
-
-    # New String/Bool/For Addition
     STRING = "STRING"
     BOOL = "BOOL"
     TRUE = "TRUE"
     FALSE = "FALSE"
-
     PLUS = "+"
     MINUS = "-"
     MULTIPLY = "*"
     DIVIDE = "/"
     EQUAL = "="
-    EQUAL_EQUAL = "=="      # NEW
-    NOT_EQUAL = "!="        # NEW
+    EQUAL_EQUAL = "=="      
+    NOT_EQUAL = "!="        
     GREATER = ">"
     LESS = "<"
-    GREATER_EQUAL = ">="    # NEW
-    LESS_EQUAL = "<="       # NEW
-
+    GREATER_EQUAL = ">="    
+    LESS_EQUAL = "<="       
     LPAREN = "("
     RPAREN = ")"
     LBRACE = "{"
     RBRACE = "}"
-
     PRINT = "PRINT"
     IF = "IF"
     ELSE = "ELSE"
     WHILE = "WHILE"
     FUNC = "FUNC"
     RETURN = "RETURN"
-
     FOR = "FOR"
     IN = "IN"
-
     EOF = "EOF"
-
-    # NEW TOKENS
     COLON = ":"
     COMMA = ","
     LBRACKET = "["
     RBRACKET = "]"
     ARROW = "->"
-
-    # NEW: DOT/CLASS/IMPORT/FROM/AS
     DOT = "."
     CLASS = "CLASS"
     IMPORT = "IMPORT"
@@ -59,7 +48,6 @@ class Token:
     def __init__(self, type, value=None, line=None, column=None):
         self.type = type
         self.value = value
-        # NEW: store position for error reporting
         self.line = line
         self.column = column
 

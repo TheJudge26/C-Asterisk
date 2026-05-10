@@ -62,9 +62,8 @@ class ASTPrinter:
             self.print_node(node.array, label="Base", is_last=False)
             self.print_node(node.index, label="Index", is_last=True)
 
-        elif isinstance(node, list): # For block bodies
+        elif isinstance(node, list): 
             for i, stmt in enumerate(node):
                 self.print_node(stmt, is_last=(i == len(node) - 1))
 
-        # Restore indent
         self.indent = old_indent

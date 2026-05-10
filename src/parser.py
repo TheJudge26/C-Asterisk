@@ -44,7 +44,7 @@ class Call(AST):
     def __init__(self, name, args):
         self.name = name
         self.args = args
-        self.object = None  # for method calls
+        self.object = None  
 
 
 class BinaryOp(AST):
@@ -456,7 +456,7 @@ class Parser:
 
             return node
 
-        # grouping
+     
         if token.type == TokenType.LPAREN:
             self.eat(TokenType.LPAREN)
             node = self.expression()
@@ -485,13 +485,11 @@ class Parser:
     def expression(self, precedence=0):
         left = self.primary()
 
-        # Fix: Removed 'self.' from PRECEDENCE
         while self.current.type in PRECEDENCE and PRECEDENCE[self.current.type] > precedence:
 
             op = self.current
             self.advance()
-
-            # Fix: Removed 'self.' from PRECEDENCE
+            
             right = self.expression(PRECEDENCE[op.type] + 1)
 
             left = BinaryOp(left, op.type, right)
