@@ -1,55 +1,55 @@
 from enum import Enum
 
 class TokenType(Enum):
-    # Core Keywords (Level 1-4)
-    LET          = "LET"
-    PRINT        = "PRINT"
-    IF           = "IF"
-    ELSE         = "ELSE"
-    WHILE        = "WHILE"
-    FUNC         = "FUNC"
-    RETURN       = "RETURN"
-    
-    # Milestone 1: Booleans (Level 6)
-    TRUE         = "TRUE"
-    FALSE        = "FALSE"
-    BOOL_TYPE    = "BOOL"
-    
-    # Identifiers & Literals
-    IDENTIFIER   = "IDENTIFIER"
-    NUMBER       = "NUMBER"
-    FLOAT        = "FLOAT"
-    
-    # Operators (Level 1-4)
-    PLUS         = "+"
-    MINUS        = "-"
-    MULTIPLY     = "*"
-    DIVIDE       = "/"
-    EQUAL        = "="
-    EQUAL_EQUAL  = "=="
-    GREATER      = ">"
-    LESS         = "<"
-    
-    # Punctuation & Brackets (Level 4-5)
-    LPAREN       = "("
-    RPAREN       = ")"
-    LBRACE       = "{"
-    RBRACE       = "}"
-    LBRACKET     = "["
-    RBRACKET     = "]"
-    COLON        = ":"
-    COMMA        = ","
-    ARROW        = "->"
-    EOF          = "EOF"
+    LET = "LET"
+    IDENTIFIER = "IDENTIFIER"
+    NUMBER = "NUMBER"
+    FLOAT = "FLOAT"
+    STRING = "STRING"
+    BOOL = "BOOL"
+    TRUE = "TRUE"
+    FALSE = "FALSE"
+    PLUS = "+"
+    MINUS = "-"
+    MULTIPLY = "*"
+    DIVIDE = "/"
+    EQUAL = "="
+    EQUAL_EQUAL = "=="      
+    NOT_EQUAL = "!="        
+    GREATER = ">"
+    LESS = "<"
+    GREATER_EQUAL = ">="    
+    LESS_EQUAL = "<="       
+    LPAREN = "("
+    RPAREN = ")"
+    LBRACE = "{"
+    RBRACE = "}"
+    PRINT = "PRINT"
+    IF = "IF"
+    ELSE = "ELSE"
+    WHILE = "WHILE"
+    FUNC = "FUNC"
+    RETURN = "RETURN"
+    FOR = "FOR"
+    IN = "IN"
+    EOF = "EOF"
+    COLON = ":"
+    COMMA = ","
+    LBRACKET = "["
+    RBRACKET = "]"
+    ARROW = "->"
+    DOT = "."
+    CLASS = "CLASS"
+    IMPORT = "IMPORT"
+    FROM = "FROM"
+    AS = "AS"
 
 class Token:
-    """A single lexical unit with its type, value, and source location."""
-    def __init__(self, type: TokenType, value=None, line: int = 0, column: int = 0):
-        self.type   = type
-        self.value  = value
-        self.line   = line
+    def __init__(self, type, value=None, line=None, column=None):
+        self.type = type
+        self.value = value
+        self.line = line
         self.column = column
 
     def __repr__(self):
-        # Professional representation for debugging
-        return f"Token({self.type.name}, value={self.value!r}, line={self.line}, col={self.column})"
+        return f"{self.type} : {self.value} (Line {self.line}, Col {self.column})"

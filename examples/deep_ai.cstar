@@ -1,0 +1,52 @@
+class DeepNetwork {
+    let inputs: [float] = [1.5, 2.0, -1.0]
+
+    # Hidden Layer Matrices!
+    let h_weights: [[float]] = [
+        [0.5, -0.2, 0.1],
+        [-0.5, 0.8, -0.3],
+        [0.2, 0.2, 0.2]
+    ]
+    let h_biases: [float] = [0.1, -0.1, 0.0]
+
+    # Output Layer
+    let o_weights: [float] = [0.5, -0.5, 0.8]
+    let o_bias: float = 0.1
+
+    func forward() -> float {
+        # --- HIDDEN LAYER ---
+        # Neuron 0
+        let h0_sum: float = self.h_biases[0]
+        for i in 3 { h0_sum = h0_sum + (self.inputs[i] * self.h_weights[0][i]) }
+        let h0: float = 1.0 / (1.0 + exp(0.0 - h0_sum))
+
+        # Neuron 1
+        let h1_sum: float = self.h_biases[1]
+        for i in 3 { h1_sum = h1_sum + (self.inputs[i] * self.h_weights[1][i]) }
+        let h1: float = 1.0 / (1.0 + exp(0.0 - h1_sum))
+
+        # Neuron 2
+        let h2_sum: float = self.h_biases[2]
+        for i in 3 { h2_sum = h2_sum + (self.inputs[i] * self.h_weights[2][i]) }
+        let h2: float = 1.0 / (1.0 + exp(0.0 - h2_sum))
+
+        # --- OUTPUT LAYER ---
+        let out_sum: float = self.o_bias
+        out_sum = out_sum + (h0 * self.o_weights[0])
+        out_sum = out_sum + (h1 * self.o_weights[1])
+        out_sum = out_sum + (h2 * self.o_weights[2])
+
+        return 1.0 / (1.0 + exp(0.0 - out_sum))
+    }
+}
+
+let ai = DeepNetwork()
+let limit: int = 1000000
+let prediction: float = 0.0
+
+# Run the Deep Network 1,000,000 times!
+for iter in limit {
+    prediction = ai.forward()
+}
+
+print(prediction)

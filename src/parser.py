@@ -1,341 +1,534 @@
-"""
-parser.py — Recursive-descent parser for C*.
-
-Level 6 Updates:
-1. Added Boolean AST node.
-2. Updated parse_type() to handle the 'bool' keyword.
-3. Updated _primary() to handle 'true' and 'false' literals.
-4. Preserved Level 5 recursive tensor parsing and ArrayIndex chaining.
-"""
-
 from tokens import TokenType
+from errors import ParserError
 
-# ═══════════════════════════════════════════════════════════════════
-#  AST node hierarchy
-# ═══════════════════════════════════════════════════════════════════
 
-class AST:                  pass
+# =========================
+# AST BASE
+# =========================
+class AST:
+    pass
 
+
+# =========================
+# LITERALS
+# =========================
 class Number(AST):
-    def __init__(self, value):                self.value = value
-
-class FloatNode(AST):
-    def __init__(self, value):                self.value = value
-
-class Boolean(AST):
-    """New for Level 6: Represents true or false literals."""
-    def __init__(self, value):                self.value = value
-
-class Variable(AST):
-    def __init__(self, name):                 self.name = name
-
-class ArrayLiteral(AST):
-    def __init__(self, elements):             self.elements = elements
-
-class ArrayIndex(AST):
-    """Represents a single indexing step: base[index]."""
-    def __init__(self, base, index):
-        self.name  = base   
-        self.index = index
-
-class BinaryOp(AST):
-    def __init__(self, left, op, right):
-        self.left  = left
-        self.op    = op
-        self.right = right
-
-class VarDecl(AST):
-    def __init__(self, name, type_annotation, value):
-        self.name            = name
-        self.type_annotation = type_annotation
-        self.value           = value
-
-class Assignment(AST):
-    def __init__(self, name, value):
-        self.name  = name
+    def __init__(self, value):
         self.value = value
 
-class Print(AST):
-    def __init__(self, value):                self.value = value
 
-class If(AST):
-    def __init__(self, condition, body, else_body=None):
-        self.condition = condition
-        self.body      = body
-        self.else_body = else_body
+class FloatNode(AST):
+    def __init__(self, value):
+        self.value = value
 
-class While(AST):
-    def __init__(self, condition, body):
-        self.condition = condition
-        self.body      = body
 
-class Return(AST):
-    def __init__(self, value):                self.value = value
+class StringNode(AST):
+    def __init__(self, value):
+        self.value = value
+
+
+class BoolNode(AST):
+    def __init__(self, value):
+        self.value = value
+
+
+# =========================
+# EXPRESSIONS
+# =========================
+class Variable(AST):
+    def __init__(self, name):
+        self.name = name
+
 
 class Call(AST):
     def __init__(self, name, args):
         self.name = name
         self.args = args
+        self.object = None  
 
+
+class BinaryOp(AST):
+    def __init__(self, left, op, right):
+        self.left = left
+        self.op = op
+        self.right = right
+
+
+# =========================
+# STATEMENTS
+# =========================
+class VarDecl(AST):
+    def __init__(self, name, type_annotation, value):
+        self.name = name
+        self.type_annotation = type_annotation
+        self.value = value
+
+
+class Assignment(AST):
+    def __init__(self, name, value, target=None):
+        self.name = name
+        self.value = value
+        self.target = target 
+
+
+class Print(AST):
+    def __init__(self, value):
+        self.value = value
+
+
+class If(AST):
+    def __init__(self, condition, body, else_body=None):
+        self.condition = condition
+        self.body = body
+        self.else_body = else_body
+
+
+class While(AST):
+    def __init__(self, condition, body):
+        self.condition = condition
+        self.body = body
+
+
+class For(AST):
+    def __init__(self, var, iterable, body):
+        self.var = var
+        self.iterable = iterable
+        self.body = body
+
+
+class Return(AST):
+    def __init__(self, value):
+        self.value = value
+
+class ExpressionStatement(AST):
+    def __init__(self, expression):
+        self.expression = expression
+
+
+# =========================
+# FUNCTIONS
+# =========================
 class Function(AST):
     def __init__(self, name, params, return_type, body):
-        self.name        = name
-        self.params      = params        
+        self.name = name
+        self.params = params
         self.return_type = return_type
-        self.body        = body
+        self.body = body
 
+
+# =========================
+# ARRAYS
+# =========================
+class ArrayLiteral(AST):
+    def __init__(self, elements):
+        self.elements = elements
+
+
+class ArrayIndex(AST):
+    def __init__(self, array, index):
+        self.array = array
+        self.index = index
+
+
+# =========================
+# PROGRAM
+# =========================
 class Program(AST):
-    def __init__(self, statements):       self.statements = statements
+    def __init__(self, statements):
+        self.statements = statements
 
 
-# ═══════════════════════════════════════════════════════════════════
-#  Parser
-# ═══════════════════════════════════════════════════════════════════
+# =========================
+# CLASSES
+# =========================
+class ClassDecl(AST):
+    def __init__(self, name, body):
+        self.name = name
+        self.body = body
 
-class ParseError(Exception):
-    pass
+
+class MemberAccess(AST):
+    def __init__(self, obj, member):
+        self.object = obj
+        self.member = member
 
 
+class Import(AST):
+    def __init__(self, module):
+        self.module = module
+
+PRECEDENCE = {
+    TokenType.EQUAL_EQUAL: 1,
+    TokenType.NOT_EQUAL: 1,
+
+    TokenType.GREATER: 2,
+    TokenType.LESS: 2,
+    TokenType.GREATER_EQUAL: 2,
+    TokenType.LESS_EQUAL: 2,
+
+    TokenType.PLUS: 3,
+    TokenType.MINUS: 3,
+
+    TokenType.MULTIPLY: 4,
+    TokenType.DIVIDE: 4,
+}
+
+# =========================
+# PARSER
+# =========================
 class Parser:
     def __init__(self, tokens):
-        self.tokens  = tokens
-        self.pos     = 0
-        self.current = tokens[0]
+        self.tokens = tokens
+        self.pos = 0
+        self.current = tokens[self.pos]
 
-    # ---------------------------------------------------------------- helpers
-
-    def _advance(self):
+    def advance(self):
         self.pos += 1
         self.current = self.tokens[self.pos] if self.pos < len(self.tokens) else self.tokens[-1]
 
-    def _peek(self):
-        nxt = self.pos + 1
-        return self.tokens[nxt] if nxt < len(self.tokens) else None
-
-    def _eat(self, token_type: TokenType):
+    def eat(self, token_type):
         if self.current.type == token_type:
-            self._advance()
+            self.advance()
         else:
-            raise ParseError(
-                f"Line {self.current.line}, Col {self.current.column}: "
-                f"Expected {token_type}, got {self.current.type} ({self.current.value!r})"
+            raise ParserError(
+                f"Expected {token_type}, got {self.current.type}",
+                self.current.line,
+                self.current.column
             )
 
-    # ---------------------------------------------------------------- types
+    def peek(self):
+        return self.tokens[self.pos + 1] if self.pos + 1 < len(self.tokens) else None
 
-    def parse_type(self) -> str:
-        """Preserves Level 5 recursive parsing for [[float]]."""
-        if self.current.type == TokenType.LBRACKET:
-            self._eat(TokenType.LBRACKET)
-            inner = self.parse_type()          
-            self._eat(TokenType.RBRACKET)
-            return f"[{inner}]"
-        
-        # Milestone 1: Handle bool keyword
-        if self.current.type == TokenType.BOOL_TYPE:
-            self._eat(TokenType.BOOL_TYPE)
-            return "bool"
-            
-        name = self.current.value
-        self._eat(TokenType.IDENTIFIER)
-        return name
-
-    # ---------------------------------------------------------------- entry
-
-    def parse(self) -> Program:
+    # =========================
+    # ENTRY
+    # =========================
+    def parse(self):
         statements = []
         while self.current.type != TokenType.EOF:
-            statements.append(self._statement())
+            statements.append(self.statement())
         return Program(statements)
 
-    # ---------------------------------------------------------------- statements
+    # =========================
+    # STATEMENTS
+    # =========================
+    def statement(self):
+        if self.current.type == TokenType.LET:
+            return self.var_decl()
+        elif self.current.type == TokenType.PRINT:
+            return self.print_stmt()
+        elif self.current.type == TokenType.IF:
+            return self.if_stmt()
+        elif self.current.type == TokenType.WHILE:
+            return self.while_stmt()
+        elif self.current.type == TokenType.FOR:
+            return self.for_stmt()
+        elif self.current.type == TokenType.RETURN:
+            return self.return_stmt()
+        elif self.current.type == TokenType.FUNC:
+            return self.function_decl()
+        elif self.current.type == TokenType.CLASS:
+            return self.class_decl()
+        elif self.current.type == TokenType.IMPORT:
+            return self.import_stmt()
+        elif self.current.type == TokenType.IDENTIFIER:
+            # 1. Parse the left side (could be 'x', 'arr[i]', or 'obj.field')
+            target = self.expression()
+            
+            # 2. Check if an '=' comes next (Memory Overwrite!)
+            if self.current.type == TokenType.EQUAL:
+                self.eat(TokenType.EQUAL)
+                value = self.expression()
+                
+                # If it's a simple variable (x = 5)
+                if type(target).__name__ == "Variable":
+                    return Assignment(target.name, value)
+                
+                # If it's an array or object field (arr[i] = 5)
+                return Assignment("memory_overwrite", value, target=target)
 
-    def _statement(self):
-        t = self.current.type
-        if   t == TokenType.LET:    return self._var_decl()
-        elif t == TokenType.PRINT:  return self._print_stmt()
-        elif t == TokenType.IF:     return self._if_stmt()
-        elif t == TokenType.WHILE:  return self._while_stmt()
-        elif t == TokenType.RETURN: return self._return_stmt()
-        elif t == TokenType.FUNC:   return self._function_decl()
-        elif (t == TokenType.IDENTIFIER
-              and self._peek() is not None
-              and self._peek().type == TokenType.EQUAL):
-            return self._assignment()
-        else:
-            raise ParseError(
-                f"Line {self.current.line}, Col {self.current.column}: "
-                f"Unexpected token {self.current.type} ({self.current.value!r})"
-            )
+            if isinstance(target, Variable):
+                return target
+            return ExpressionStatement(target)
+            
 
-    def _function_decl(self) -> Function:
-        self._eat(TokenType.FUNC)
+
+    def print_stmt(self):
+        self.eat(TokenType.PRINT)
+        value = self.expression()
+        return Print(value)
+    
+    def return_stmt(self):
+        self.eat(TokenType.RETURN)
+        value = self.expression()
+        return Return(value)
+    
+    def if_stmt(self):
+        self.eat(TokenType.IF)
+        condition = self.expression()
+        body = self.block()
+
+        else_body = None
+        if self.current.type == TokenType.ELSE:
+            self.eat(TokenType.ELSE)
+            else_body = self.block()
+
+        return If(condition, body, else_body)
+    
+    def while_stmt(self):
+        self.eat(TokenType.WHILE)
+        condition = self.expression()
+        body = self.block()
+
+        return While(condition, body)
+
+    # =========================
+    # FUNCTION DECL
+    # =========================
+    def function_decl(self):
+        self.eat(TokenType.FUNC)
         name = self.current.value
-        self._eat(TokenType.IDENTIFIER)
-        self._eat(TokenType.LPAREN)
+        self.eat(TokenType.IDENTIFIER)
+
+        self.eat(TokenType.LPAREN)
 
         params = []
         if self.current.type != TokenType.RPAREN:
-            params.append(self._parameter())
+            params.append(self.parameter())
             while self.current.type == TokenType.COMMA:
-                self._eat(TokenType.COMMA)
-                params.append(self._parameter())
+                self.eat(TokenType.COMMA)
+                params.append(self.parameter())
 
-        self._eat(TokenType.RPAREN)
-        self._eat(TokenType.ARROW)
-        ret_ty = self.parse_type()          
-        return Function(name, params, ret_ty, self._block())
+        self.eat(TokenType.RPAREN)
+        self.eat(TokenType.ARROW)
 
-    def _parameter(self) -> dict:
+        return_type = str(self.current.value)
+        self.eat(TokenType.IDENTIFIER)
+
+        body = self.block()
+        return Function(name, params, return_type, body)
+
+    def parameter(self):
         name = self.current.value
-        self._eat(TokenType.IDENTIFIER)
-        self._eat(TokenType.COLON)
-        return {"name": name, "type": self.parse_type()}   
+        self.eat(TokenType.IDENTIFIER)
+        self.eat(TokenType.COLON)
 
-    def _var_decl(self) -> VarDecl:
-        self._eat(TokenType.LET)
+        if self.current.type == TokenType.LBRACKET:
+            self.eat(TokenType.LBRACKET)
+            t = "[" + self.current.value + "]"
+            self.eat(TokenType.IDENTIFIER)
+            self.eat(TokenType.RBRACKET)
+        else:
+            t = self.current.value
+            self.eat(TokenType.IDENTIFIER)
+
+        return {"name": name, "type": str(t)}
+
+    # =========================
+    # CLASS / IMPORT
+    # =========================
+    def class_decl(self):
+        self.eat(TokenType.CLASS)
         name = self.current.value
-        self._eat(TokenType.IDENTIFIER)
-        self._eat(TokenType.COLON)
-        ty = self.parse_type()              
-        self._eat(TokenType.EQUAL)
-        return VarDecl(name, ty, self._expression())
+        self.eat(TokenType.IDENTIFIER)
+        return ClassDecl(name, self.block())
 
-    def _assignment(self) -> Assignment:
-        name = self.current.value
-        self._eat(TokenType.IDENTIFIER)
-        self._eat(TokenType.EQUAL)
-        return Assignment(name, self._expression())
+    def import_stmt(self):
+        self.eat(TokenType.IMPORT)
+        module = self.current.value
+        self.eat(TokenType.IDENTIFIER)
+        return Import(module)
 
-    def _print_stmt(self) -> Print:
-        self._eat(TokenType.PRINT)
-        self._eat(TokenType.LPAREN)
-        val = self._expression()
-        self._eat(TokenType.RPAREN)
-        return Print(val)
-
-    def _if_stmt(self) -> If:
-        self._eat(TokenType.IF)
-        cond = self._expression()
-        body = self._block()
-        else_body = None
-        if self.current.type == TokenType.ELSE:
-            self._eat(TokenType.ELSE)
-            else_body = self._block()
-        return If(cond, body, else_body)
-
-    def _while_stmt(self) -> While:
-        self._eat(TokenType.WHILE)
-        return While(self._expression(), self._block())
-
-    def _return_stmt(self) -> Return:
-        self._eat(TokenType.RETURN)
-        return Return(self._expression())
-
-    def _block(self) -> list:
+    # =========================
+    # BLOCK
+    # =========================
+    def block(self):
         statements = []
-        self._eat(TokenType.LBRACE)
+        self.eat(TokenType.LBRACE)
+
         while self.current.type not in (TokenType.RBRACE, TokenType.EOF):
-            statements.append(self._statement())
-        self._eat(TokenType.RBRACE)
+            statements.append(self.statement())
+
+        self.eat(TokenType.RBRACE)
         return statements
 
-    # ---------------------------------------------------------------- expressions
+    # =========================
+    # FOR LOOP FIXED
+    # =========================
+    def for_stmt(self):
+        self.eat(TokenType.FOR)
+        var = self.current.value
+        self.eat(TokenType.IDENTIFIER)
 
-    def _expression(self):
-        return self._comparison()
+        if self.current.type != TokenType.IN:
+            raise ParserError("Expected 'in'", self.current.line, self.current.column)
 
-    def _comparison(self):
-        node = self._term()
-        while self.current.type in (TokenType.GREATER, TokenType.LESS, TokenType.EQUAL_EQUAL):
-            op = self.current.type
-            self._advance()
-            node = BinaryOp(node, op, self._term())
-        return node
+        self.eat(TokenType.IN)
 
-    def _term(self):
-        node = self._factor()
-        while self.current.type in (TokenType.PLUS, TokenType.MINUS):
-            op = self.current.type
-            self._advance()
-            node = BinaryOp(node, op, self._factor())
-        return node
+        iterable = self.expression()
+        body = self.block()
 
-    def _factor(self):
-        node = self._unary()
-        while self.current.type in (TokenType.MULTIPLY, TokenType.DIVIDE):
-            op = self.current.type
-            self._advance()
-            node = BinaryOp(node, op, self._unary())
-        return node
+        return For(var, iterable, body)
 
-    def _unary(self):
-        if self.current.type == TokenType.MINUS:
-            self._advance()
-            return BinaryOp(Number(0), TokenType.MINUS, self._primary())
-        return self._primary()
-
-    def _primary(self):
+    # =========================
+    # EXPRESSIONS (FIXED CHAINING)
+    # =========================
+    def primary(self):
         token = self.current
 
+# UNARY MINUS
+        if token.type == TokenType.MINUS:
+            self.eat(TokenType.MINUS)
+            if self.current.type == TokenType.FLOAT:
+                val = self.current.value
+                self.eat(TokenType.FLOAT)
+                return FloatNode(-val)
+            elif self.current.type == TokenType.NUMBER:
+                val = self.current.value
+                self.eat(TokenType.NUMBER)
+                return Number(-val)
+            else:
+                raise ParserError("Expected a number after '-'", token.line, token.column)
+            
+        # literals
         if token.type == TokenType.NUMBER:
-            self._eat(TokenType.NUMBER)
+            self.eat(TokenType.NUMBER)
             return Number(token.value)
 
         if token.type == TokenType.FLOAT:
-            self._eat(TokenType.FLOAT)
+            self.eat(TokenType.FLOAT)
             return FloatNode(token.value)
-            
-        # Milestone 1: Boolean literals
+
+        if token.type == TokenType.STRING:
+            self.eat(TokenType.STRING)
+            return StringNode(token.value)
+
         if token.type == TokenType.TRUE:
-            self._eat(TokenType.TRUE)
-            return Boolean(True)
+            self.eat(TokenType.TRUE)
+            return BoolNode(True)
+
         if token.type == TokenType.FALSE:
-            self._eat(TokenType.FALSE)
-            return Boolean(False)
+            self.eat(TokenType.FALSE)
+            return BoolNode(False)
 
+        # IDENTIFIER CHAINING FIX
         if token.type == TokenType.IDENTIFIER:
-            name = token.value
-            self._eat(TokenType.IDENTIFIER)
+            node = Variable(token.value)
+            self.eat(TokenType.IDENTIFIER)
 
-            if self.current.type == TokenType.LPAREN:
-                self._eat(TokenType.LPAREN)
-                args = []
-                if self.current.type != TokenType.RPAREN:
-                    args.append(self._expression())
-                    while self.current.type == TokenType.COMMA:
-                        self._eat(TokenType.COMMA)
-                        args.append(self._expression())
-                self._eat(TokenType.RPAREN)
-                return Call(name, args)
+            while True:
 
-            # Preserves chaining: matrix[i][j]
-            node = Variable(name)
-            while self.current.type == TokenType.LBRACKET:
-                self._eat(TokenType.LBRACKET)
-                idx  = self._expression()
-                self._eat(TokenType.RBRACKET)
-                node = ArrayIndex(node, idx)
+                # CALL
+                if self.current.type == TokenType.LPAREN:
+                    self.eat(TokenType.LPAREN)
+
+                    args = []
+                    if self.current.type != TokenType.RPAREN:
+                        args.append(self.expression())
+                        while self.current.type == TokenType.COMMA:
+                            self.eat(TokenType.COMMA)
+                            args.append(self.expression())
+
+                    self.eat(TokenType.RPAREN)
+
+                    if isinstance(node, MemberAccess):
+                        call = Call(node.member, args)
+                        call.object = node.object
+                        node = call
+                    else:
+                        node = Call(node.name, args)
+
+                # INDEX
+                elif self.current.type == TokenType.LBRACKET:
+                    self.eat(TokenType.LBRACKET)
+                    index = self.expression()
+                    self.eat(TokenType.RBRACKET)
+                    node = ArrayIndex(node, index)
+
+                # MEMBER ACCESS
+                elif self.current.type == TokenType.DOT:
+                    self.eat(TokenType.DOT)
+                    member = self.current.value
+                    self.eat(TokenType.IDENTIFIER)
+                    node = MemberAccess(node, member)
+
+                else:
+                    break
+
             return node
 
+     
         if token.type == TokenType.LPAREN:
-            self._eat(TokenType.LPAREN)
-            node = self._expression()
-            self._eat(TokenType.RPAREN)
+            self.eat(TokenType.LPAREN)
+            node = self.expression()
+            self.eat(TokenType.RPAREN)
             return node
 
+        # array
         if token.type == TokenType.LBRACKET:
-            self._eat(TokenType.LBRACKET)
+            self.eat(TokenType.LBRACKET)
             elements = []
+
             if self.current.type != TokenType.RBRACKET:
-                elements.append(self._expression())
+                elements.append(self.expression())
                 while self.current.type == TokenType.COMMA:
-                    self._eat(TokenType.COMMA)
-                    elements.append(self._expression())
-            self._eat(TokenType.RBRACKET)
+                    self.eat(TokenType.COMMA)
+                    elements.append(self.expression())
+
+            self.eat(TokenType.RBRACKET)
             return ArrayLiteral(elements)
 
-        raise ParseError(
-            f"Line {token.line}, Col {token.column}: "
-            f"Unexpected token {token.type} ({token.value!r}) in expression"
-        )
+        raise ParserError(f"Unexpected {token.type}", token.line, token.column)
+
+    # =========================
+    # EXPRESSIONS WRAPPER
+    # =========================
+    def expression(self, precedence=0):
+        left = self.primary()
+
+        while self.current.type in PRECEDENCE and PRECEDENCE[self.current.type] > precedence:
+
+            op = self.current
+            self.advance()
+            
+            right = self.expression(PRECEDENCE[op.type] + 1)
+
+            left = BinaryOp(left, op.type, right)
+
+        return left
+    
+    def assignment(self):
+        name = self.current.value
+        self.eat(TokenType.IDENTIFIER)
+        self.eat(TokenType.EQUAL)
+        value = self.expression()
+        return Assignment(name, value)
+    
+   
+    def parse_type(self):
+        """Recursively parses types like int, float, [int], [[float]]."""
+        if self.current.type == TokenType.LBRACKET:
+            self.eat(TokenType.LBRACKET)
+            inner = self.parse_type()
+            self.eat(TokenType.RBRACKET)
+            return f"[{inner}]"
+        else:
+            val = self.current.value
+            self.eat(TokenType.IDENTIFIER)
+            return str(val)
+
+    
+    def var_decl(self):
+        """Parses a variable declaration: let name: type = value"""
+        self.eat(TokenType.LET)
+        name = self.current.value
+        self.eat(TokenType.IDENTIFIER)
+
+        # Use our new recursive type parser!
+        type_annotation = None
+        if self.current.type == TokenType.COLON:
+            self.eat(TokenType.COLON)
+            type_annotation = self.parse_type()
+
+        self.eat(TokenType.EQUAL)
+        value = self.expression()
+        return VarDecl(name, type_annotation, value)

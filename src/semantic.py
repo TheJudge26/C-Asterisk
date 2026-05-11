@@ -1,222 +1,464 @@
-"""
-semantic.py — Type-checking / scope-resolution pass for C*.
-
-Level 6 Updates:
-1. Added validation for the 'bool' primitive type.
-2. Added visitor for Boolean nodes.
-3. Updated BinaryOp to return 'bool' for comparisons (>, <, ==).
-4. Preserved Level 5 N-D array/tensor logic and math built-ins.
-"""
-
 from tokens import TokenType
 from parser import (
-    Program, VarDecl, Assignment, BinaryOp, Number, FloatNode, Boolean,
-    Variable, Print, If, While, Return, Function, Call,
-    ArrayIndex, ArrayLiteral,
+    Program, VarDecl, Assignment, BinaryOp, Number, Variable, Print,
+    If, While, Function, Return, ArrayLiteral, ArrayIndex,
+    FloatNode, Call, StringNode, BoolNode, For,
+    ClassDecl, MemberAccess, Import, ExpressionStatement,
 )
+from errors import SemanticError
+from error_list import ErrorReporter
 
 
-class SemanticError(Exception):
-    pass
+# -----------------------------
+# TYPES
+# -----------------------------
+SEMANTIC_TYPES = {
+    "int": "int",
+    "float": "float",
+    "string": "string",
+    "bool": "bool",
+    "read": "string",
+    "write": "void",
+}
+
+BUILTINS = {
+    "range": "range",
+    "print": "void",
+    "len": "int",
+    "exp": "float",
+    "sqrt": "float",  
+    "log": "float",   
+    "pow": "float",   
+    "load_csv": "[float]",
+}
+
+def normalize_type(t):
+    if isinstance(t, dict):
+        return t.get("type")
+    return t
+
+# -----------------------------
+# HELPERS
+# -----------------------------
+def is_array_type(t):
+    return isinstance(t, str) and t.startswith("[") and t.endswith("]")
 
 
-# ═══════════════════════════════════════════════════════════════════
-#  Symbol table (lexically-scoped)
-# ═══════════════════════════════════════════════════════════════════
+def get_array_inner(t):
+    return t[1:-1] if is_array_type(t) else None
 
+
+# -----------------------------
+# SYMBOL TABLE
+# -----------------------------
 class SymbolTable:
-    def __init__(self):
-        self.scopes = [{}]          # stack; index 0 = global scope
+    def __init__(self, errors):
+        self.scopes = [{}]
+        self.errors = errors
 
     def enter_scope(self):
         self.scopes.append({})
 
     def exit_scope(self):
-        self.scopes.pop()
+        if len(self.scopes) > 1:
+            self.scopes.pop()
 
-    def declare(self, name: str, var_type: str):
+    def declare(self, name, var_type):
         if name in self.scopes[-1]:
-            raise SemanticError(f"Variable '{name}' is already declared in this scope.")
-        self.scopes[-1][name] = var_type
+            self.errors.add(SemanticError(f"Variable '{name}' already declared"))
+            return
 
-    def lookup(self, name: str) -> str:
+        self.scopes[-1][name] = {
+            "type": var_type,
+            "mutable": True
+        }
+
+    def lookup(self, name):
         for scope in reversed(self.scopes):
             if name in scope:
-                return scope[name]
-        raise SemanticError(f"Variable '{name}' is not declared.")
+                value = scope[name]
+                return value["type"] if isinstance(value, dict) else value
 
-    def assign(self, name: str, new_type: str):
-        """Check that an assignment is type-safe."""
-        existing = self.lookup(name)
-        if existing != new_type:
-            # ALLOW WIDENING: Permit int to be assigned to a float
-            if existing == "float" and new_type == "int":
-                return
-            raise SemanticError(
-                f"Type mismatch on assignment to '{name}': "
-                f"expected '{existing}', got '{new_type}'."
-            )
-            
+        self.errors.add(SemanticError(f"Variable '{name}' not declared"))
+        return None
 
 
-# ═══════════════════════════════════════════════════════════════════
-#  Semantic analyser
-# ═══════════════════════════════════════════════════════════════════
-
-_MATH_BUILTINS = {"sqrt", "exp"}     # always return float
-
-
+# -----------------------------
+# SEMANTIC ANALYZER
+# -----------------------------
 class SemanticAnalyzer:
     def __init__(self):
-        self.symbols = SymbolTable()
+        self.errors = ErrorReporter()
+        self.symbol_table = SymbolTable(self.errors)
+        self.class_table = {}
+        self.module_table = {}
+        self.in_function = False
+        self.current_return_type = None
 
-    # ---------------------------------------------------------------- public
+    def analyze(self, ast):
+        self.visit(ast)
 
-    def analyze(self, ast: Program):
-        self._visit(ast)
-        print("   -> [Semantic Analyzer: all checks passed ✓]")
+        if self.errors.has_errors():
+            self.errors.print_errors()
+        else:
+            print("   -> Semantic analysis passed successfully")
 
-    # ---------------------------------------------------------------- dispatcher
+    # -----------------------------
+    # VISITOR
+    # -----------------------------
+    def visit(self, node):
+        if isinstance(node, Program):
+            return self.visit_program(node)
 
-    def _visit(self, node):
-        if node is None:
-            return None
-        method_name = f"_visit_{type(node).__name__}"
-        method      = getattr(self, method_name, self._visit_list_or_raise)
-        return method(node)
+        elif isinstance(node, VarDecl):
+            return self.visit_var_decl(node)
 
-    def _visit_list_or_raise(self, node):
-        if isinstance(node, list):
-            results = [self._visit(s) for s in node]
-            return results[-1] if results else None
-        raise SemanticError(f"No semantic rule for node type '{type(node).__name__}'")
+        elif isinstance(node, Assignment):
+            return self.visit_assignment(node)
 
-    # ---------------------------------------------------------------- nodes
+        elif isinstance(node, BinaryOp):
+            return self.visit_binary_op(node)
 
-    def _visit_Program(self, node: Program):
-        for stmt in node.statements:
-            self._visit(stmt)
+        elif isinstance(node, Number):
+            return "int"
 
-    def _visit_VarDecl(self, node: VarDecl):
-        val_type = self._visit(node.value)
-        if node.type_annotation != val_type:
-            # ALLOW WIDENING: let x: float = 5
-            if node.type_annotation == "float" and val_type == "int":
-                pass
-            else:
-                raise SemanticError(
-                    f"Type mismatch in declaration of '{node.name}': "
-                    f"annotated as '{node.type_annotation}', got '{val_type}'."
-                )
-        self.symbols.declare(node.name, node.type_annotation)
-
-    def _visit_Assignment(self, node: Assignment):
-        val_type = self._visit(node.value)
-        self.symbols.assign(node.name, val_type)
-
-    def _visit_BinaryOp(self, node: BinaryOp):
-        l = self._visit(node.left)
-        r = self._visit(node.right)
-        
-        # 1. Handle Comparisons (Milestone 1)
-        if node.op in (TokenType.GREATER, TokenType.LESS, TokenType.EQUAL_EQUAL):
-            if l != r and not ({l, r} == {"int", "float"}):
-                raise SemanticError(f"Cannot compare different types: '{l}' vs '{r}'.")
-            return "bool"
-            
-        # 2. Handle Math Widening (int + float -> float)
-        if l != r:
-            if {l, r} == {"int", "float"}:
-                return "float"
-            raise SemanticError(
-                f"Type mismatch in binary operation: '{l}' vs '{r}'."
-            )
-        return l
-
-    def _visit_Number(self,    node):  return "int"
-    def _visit_FloatNode(self, node):  return "float"
-    
-    # Milestone 1: Boolean literals
-    def _visit_Boolean(self,   node):  return "bool"
-
-    def _visit_Variable(self, node: Variable):
-        return self.symbols.lookup(node.name)
-
-    def _visit_Print(self, node: Print):
-        return self._visit(node.value)
-
-    def _visit_If(self, node: If):
-        cond_type = self._visit(node.condition)
-        # In Level 6, we prefer formal 'bool' for conditions
-        if cond_type not in ("bool", "int"):
-            raise SemanticError(f"IF condition must be bool or int, got '{cond_type}'.")
-            
-        self.symbols.enter_scope()
-        self._visit(node.body)
-        self.symbols.exit_scope()
-        if node.else_body is not None:
-            self.symbols.enter_scope()
-            self._visit(node.else_body)
-            self.symbols.exit_scope()
-
-    def _visit_While(self, node: While):
-        cond_type = self._visit(node.condition)
-        if cond_type not in ("bool", "int"):
-            raise SemanticError(f"WHILE condition must be bool or int, got '{cond_type}'.")
-            
-        self.symbols.enter_scope()
-        self._visit(node.body)
-        self.symbols.exit_scope()
-
-    def _visit_Function(self, node: Function):
-        # Register the function name in the outer scope
-        self.symbols.declare(node.name, node.return_type)
-        self.symbols.enter_scope()
-        for param in node.params:
-            self.symbols.declare(param["name"], param["type"])
-        self._visit(node.body)
-        self.symbols.exit_scope()
-
-    def _visit_Return(self, node: Return):
-        return self._visit(node.value)
-
-    def _visit_Call(self, node: Call):
-        if node.name in _MATH_BUILTINS:
-            if len(node.args) != 1:
-                raise SemanticError(f"'{node.name}' expects exactly 1 argument.")
-            self._visit(node.args[0])
+        elif isinstance(node, FloatNode):
             return "float"
-        return self.symbols.lookup(node.name)
 
-    def _visit_ArrayLiteral(self, node: ArrayLiteral):
-        """Semantic Analysis: Determines the TYPE of the array."""
-        if not node.elements: 
-            return "[]"
-        
-        # Get the type of the first element (e.g., "float")
-        first_type = self._visit(node.elements[0])
-        final_type = first_type
-        
-        for el in node.elements[1:]:
-            el_type = self._visit(el)
-            if el_type != final_type:
-                # Support implicit widening: [1, 2.5] becomes [float]
-                if {final_type, el_type} == {"int", "float"}:
-                    final_type = "float"
-                else:
-                    raise SemanticError(f"Mixed types in array: '{final_type}' vs '{el_type}'.")
-        
-        return f"[{final_type}]"
+        elif isinstance(node, StringNode):
+            return "string"
 
-    def _visit_ArrayIndex(self, node: ArrayIndex):
-        """Preserves Level 5 recursive array indexing."""
-        base_type  = self._visit(node.name)
-        idx_type   = self._visit(node.index)
-        if idx_type != "int":
-            raise SemanticError("Array index must be of type 'int'.")
-        if not base_type.startswith("["):
-            raise SemanticError(
-                f"Cannot index into non-array type '{base_type}'."
-            )
-        # Strip one layer of brackets: "[[float]]" -> "[float]"
-        return base_type[1:-1]
+        elif isinstance(node, BoolNode):
+            return "bool"
+
+        elif isinstance(node, Variable):
+            return self.symbol_table.lookup(node.name)
+
+        elif isinstance(node, Print):
+            self.visit(node.value)
+            return None
+
+        elif isinstance(node, If):
+            return self.visit_if(node)
+
+        elif isinstance(node, While):
+            return self.visit_while(node)
+
+        elif isinstance(node, For):
+            return self.visit_for(node)
+
+        elif isinstance(node, Function):
+            return self.visit_function(node)
+
+        elif isinstance(node, Return):
+            value_type = self.visit(node.value)
+
+            if self.in_function and value_type != self.current_return_type:
+                self.errors.add(SemanticError(
+                    f"Return type mismatch: expected {self.current_return_type} got {value_type}"
+                ))
+
+            return value_type
+
+        elif isinstance(node, Call):
+            return self.visit_call(node)
+
+        elif isinstance(node, ArrayLiteral):
+            return self.visit_array_literal(node)
+
+        elif isinstance(node, ArrayIndex):
+            array_type = self.visit(node.array)
+            if not is_array_type(array_type):
+                self.errors.add(SemanticError("Not an array"))
+                return None
+
+            index_type = self.visit(node.index)
+            if index_type != "int":
+                self.errors.add(SemanticError("Array index must be int"))
+                return None
+
+            return get_array_inner(array_type)
+
+        elif isinstance(node, ClassDecl):
+            return self.visit_class(node)
+
+        elif isinstance(node, MemberAccess):
+            return self.visit_member_access(node)
+
+        elif isinstance(node, ExpressionStatement):
+            return self.visit(node.expression)
+        
+        elif isinstance(node, list):
+            for stmt in node:
+                self.visit(stmt)
+
+        return None
+
+    # -----------------------------
+    # PROGRAM
+    # -----------------------------
+    def visit_program(self, node):
+        for stmt in node.statements:
+            self.visit(stmt)
+
+    # -----------------------------
+    # VAR DECL
+    # -----------------------------
+    def visit_var_decl(self, node):
+        var_type = normalize_type(node.type_annotation)
+        value_type = self.visit(node.value)
+
+        if var_type is None:
+            self.symbol_table.declare(node.name, value_type)
+            return
+
+        if var_type != value_type:
+            self.errors.add(SemanticError(
+                f"Type mismatch: expected {var_type} but got {value_type}"
+            ))
+            return
+
+        self.symbol_table.declare(node.name, var_type)
+
+    # -----------------------------
+    # ASSIGNMENT
+    # -----------------------------
+    def visit_assignment(self, node):
+        if getattr(node, "target", None):
+            var_type = self.visit(node.target) 
+        else:
+            var_type = normalize_type(self.symbol_table.lookup(node.name))
+            
+        value_type = self.visit(node.value)
+
+        if var_type != value_type:
+            self.errors.add(SemanticError(
+                f"Type mismatch in assignment: {var_type} vs {value_type}"
+            ))
+
+    # -----------------------------
+    # BINARY OP
+    # -----------------------------
+    def visit_binary_op(self, node):
+        left = self.visit(node.left)
+        right = self.visit(node.right)
+
+        if left is None or right is None:
+            return None
+
+        if left != right:
+            self.errors.add(SemanticError(f"Type mismatch: {left} vs {right}"))
+            return None
+
+        if node.op in (TokenType.PLUS, TokenType.MINUS,
+                       TokenType.MULTIPLY, TokenType.DIVIDE):
+            if left not in ("int", "float"):
+                self.errors.add(SemanticError("Invalid arithmetic types"))
+                return None
+            return left
+
+        if node.op in (TokenType.GREATER, TokenType.LESS, TokenType.EQUAL_EQUAL):
+            return "bool"
+
+        self.errors.add(SemanticError("Unknown operator"))
+        return None
+
+    # -----------------------------
+    # IF / WHILE
+    # -----------------------------
+    def visit_if(self, node):
+        if self.visit(node.condition) != "bool":
+            self.errors.add(SemanticError("If condition must be bool"))
+
+        self.symbol_table.enter_scope()
+        self.visit(node.body)
+        self.symbol_table.exit_scope()
+
+        if node.else_body:
+            self.symbol_table.enter_scope()
+            self.visit(node.else_body)
+            self.symbol_table.exit_scope()
+
+    def visit_while(self, node):
+        if self.visit(node.condition) != "bool":
+            self.errors.add(SemanticError("While condition must be bool"))
+
+        self.symbol_table.enter_scope()
+        self.visit(node.body)
+        self.symbol_table.exit_scope()
+
+    # -----------------------------
+    # FOR
+    # -----------------------------
+    def visit_for(self, node):
+        self.symbol_table.enter_scope()
+
+        iterable = self.visit(node.iterable)
+
+        # FIX: Allow raw "int" to be used as a loop limit
+        if iterable == "int":
+            self.symbol_table.declare(node.var, "int")
+
+        elif iterable == ("range", "int"):
+            self.symbol_table.declare(node.var, "int")
+
+        elif is_array_type(iterable):
+            self.symbol_table.declare(node.var, get_array_inner(iterable))
+
+        else:
+            self.errors.add(SemanticError(f"Invalid iterable type: {iterable}"))
+            self.symbol_table.exit_scope() # Keep scope clean on error
+            return
+
+        for stmt in node.body:
+            self.visit(stmt)
+
+        self.symbol_table.exit_scope()
+    # -----------------------------
+    # FUNCTION
+    # -----------------------------
+    def visit_function(self, node):
+        self.symbol_table.declare(node.name, {
+            "type": "function",
+            "return": node.return_type,
+            "params": node.params
+        })
+
+        self.symbol_table.enter_scope()
+        self.in_function = True
+        self.current_return_type = node.return_type
+
+        for p in node.params:
+            self.symbol_table.declare(p["name"], p["type"])
+
+        self.visit(node.body)
+
+        self.symbol_table.exit_scope()
+        self.in_function = False
+        self.current_return_type = None
+
+    # -----------------------------
+    # CALLS
+    # -----------------------------
+    def visit_call(self, node):
+        # 1. Method Calls
+        if getattr(node, "object", None) is not None:
+            obj_type = self.visit(node.object)
+            if obj_type in self.class_table:
+                cls = self.class_table[obj_type]
+                if node.name in cls["methods"]:
+                    return cls["methods"][node.name]["return"]
+            self.errors.add(SemanticError(f"Method '{node.name}' not found"))
+            return None
+
+        # 2. Builtins
+        if node.name in BUILTINS:
+            for a in node.args:
+                self.visit(a)
+            return BUILTINS[node.name]
+
+        # 3. Class Constructors
+        if node.name in self.class_table:
+            for a in node.args:
+                self.visit(a)
+            return node.name
+
+        # 4. Standard Functions
+        func = None
+        for scope in reversed(self.symbol_table.scopes):
+            if node.name in scope:
+                func = scope[node.name]
+                break
+
+        if isinstance(func, dict) and func.get("type") == "function":
+            params = func["params"]
+            if len(params) != len(node.args):
+                self.errors.add(SemanticError("Argument count mismatch"))
+                return func["return"]
+
+            for i in range(len(params)):
+                arg_type = self.visit(node.args[i])
+                if arg_type != params[i]["type"]:
+                    self.errors.add(SemanticError(
+                        f"Argument mismatch: expected {params[i]['type']} got {arg_type}"
+                    ))
+            return func["return"]
+
+        self.errors.add(SemanticError(f"Function '{node.name}' not declared"))
+        return None
+        # -----------------------------------------------------
+
+        
+        
+        
+
+    # -----------------------------
+    # ARRAY
+    # -----------------------------
+    def visit_array_literal(self, node):
+        if not node.elements:
+            return "[any]"
+
+        t = self.visit(node.elements[0])
+
+        for e in node.elements:
+            if self.visit(e) != t:
+                self.errors.add(SemanticError("Array type mismatch"))
+                return None
+
+        return f"[{t}]"
+
+    # -----------------------------
+    # CLASS
+    # -----------------------------
+    def visit_class(self, node):
+        if node.name in self.class_table:
+            self.errors.add(SemanticError("Duplicate class"))
+            return
+
+        fields = {}
+        methods = {}
+
+        for m in node.body:
+            if isinstance(m, VarDecl):
+                fields[m.name] = m.type_annotation
+            elif isinstance(m, Function):
+                
+                if not any(p["name"] == "self" for p in m.params):
+                    m.params.insert(0, {"name": "self", "type": node.name})
+                
+                methods[m.name] = {
+                    "params": m.params,
+                    "return": m.return_type
+                }
+
+        self.class_table[node.name] = {
+            "fields": fields,
+            "methods": methods
+        }
+
+        self.symbol_table.enter_scope()
+        for m in node.body:
+            self.visit(m)
+        self.symbol_table.exit_scope()
+
+    # -----------------------------
+    # MEMBER ACCESS
+    # -----------------------------
+    def visit_member_access(self, node):
+        obj = self.visit(node.object)
+
+        if obj not in self.class_table:
+            self.errors.add(SemanticError("Not a class instance"))
+            return None
+
+        cls = self.class_table[obj]
+
+        if node.member in cls["fields"]:
+            return cls["fields"][node.member]
+
+        if node.member in cls["methods"]:
+            return cls["methods"][node.member]["return"]
+
+        self.errors.add(SemanticError("Invalid member"))
+        return None

@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Level 6 Final Test: The Simple Neuron
 
 # 1. Define the activation function (Sigmoid)
@@ -23,4 +24,20 @@ while i < 3 {
 let activation: float = sigmoid(sum)
 
 # 5. Output Result
+=======
+let inputs: [float] = [1.5, 2.0]
+let weights: [float] = [0.5, -0.2]
+let bias: float = 0.1
+
+let sum: float = bias
+
+# Dot Product (Matrix Math)
+for i in 2 {
+    sum = sum + (inputs[i] * weights[i])
+}
+
+# Sigmoid Activation Function
+let activation: float = 1.0 / (1.0 + exp(0.0 - sum))
+
+>>>>>>> b484615f0d6fc62b5f85cfd0e486e869579afbf2
 print(activation)

@@ -1,0 +1,8 @@
+let sum: float = 0.0
+let limit: int = 50000000
+
+for i in limit {
+    sum = sum + 1.0
+}
+
+print(sum)

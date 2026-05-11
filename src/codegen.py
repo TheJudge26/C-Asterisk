@@ -1,41 +1,16 @@
-"""
-codegen.py — LLVM IR code generator for C* via llvmlite.
-
-Key fixes & additions vs. the previous version
-───────────────────────────────────────────────
-1. visit_ArrayIndex: robust GEP logic that distinguishes between
-     • a fixed-size local array  ([N x T]*)   → needs double-index GEP
-     • a pointer-to-element      (T*)          → single-index GEP
-   This eliminates the TypeError crash on chained / parameter arrays.
-
-2. Multidimensional arrays  ([[float]], etc.):
-   • visit_ArrayLiteral builds nested ir.ArrayType constants recursively.
-   • visit_ArrayIndex chains through multiple levels correctly.
-
-3. Standard math library (sqrt, exp) properly linked from libm.
-
-4. Level 6 Milestone 1: Formal i1 bool type and Boolean literal support.
-5. Level 6 Milestone 2: Tensor Addition (A + B) generates nested LLVM IR loops.
-6. Level 6 Milestone 3: Comparisons return formal i1 booleans.
-"""
-
-import llvmlite.ir       as ir
-import llvmlite.binding  as llvm
+import llvmlite.ir as ir
+import llvmlite.binding as llvm
 
 from tokens import TokenType
 from parser import (
-    Program, Function, Call, BinaryOp, VarDecl, Assignment,
-    ArrayIndex, Variable, Number, FloatNode, Boolean, Return, Print,
-    ArrayLiteral, While, If,
+    Program, Function, Print, Number, BinaryOp,
+    VarDecl, Variable, Assignment, If, While,
+    Return, ArrayLiteral, ArrayIndex, FloatNode,
+    Call, StringNode, BoolNode, For
 )
 
 
-class CodeGenError(Exception):
-    pass
-
-
 class LLVMCodeGenerator:
-
     def __init__(self):
         llvm.initialize_native_target()
         llvm.initialize_native_asmprinter()
@@ -43,444 +18,634 @@ class LLVMCodeGenerator:
         self.module = ir.Module(name="cstar_module")
         self.module.triple = llvm.get_default_triple()
 
-        self.builder:   ir.IRBuilder | None = None
-        self.variables: dict                = {}     # name → alloca ptr
+        self.builder = None
+        self.variables = {}
+        self.classes = {}
 
-        # ---- primitive IR types
-        self.i32_type   = ir.IntType(32)
-        self.float_type = ir.DoubleType()
-        self.bool_type  = ir.IntType(1)  # Milestone 1: Added for Level 6
-        self.i8_ptr     = ir.IntType(8).as_pointer()
+        self.i32 = ir.IntType(32)
+        self.f64 = ir.DoubleType()
+        self.i8_ptr = ir.IntType(8).as_pointer()
 
-        # ---- printf (variadic)
-        printf_ty   = ir.FunctionType(self.i32_type, [self.i8_ptr], var_arg=True)
+        printf_ty = ir.FunctionType(self.i32, [self.i8_ptr], var_arg=True)
         self.printf = ir.Function(self.module, printf_ty, name="printf")
+        # Link the C math library 'exp' function
+        exp_ty = ir.FunctionType(self.f64, [self.f64])
+        self.exp_func = ir.Function(self.module, exp_ty, name="exp")
+    
+        # The C function takes a string (char*) and an integer (int), and returns a float pointer (double*)
+        csv_ty = ir.FunctionType(self.f64.as_pointer(), [self.i8_ptr, self.i32])
+        self.load_csv_func = ir.Function(self.module, csv_ty, name="load_csv_native")
+        
 
-        # printf format string: "%f\n\0"
-        self._fmt_bytes = bytearray(b"%f\n\0")
+        self.sqrt_func = ir.Function(self.module, exp_ty, name="sqrt")
+        self.log_func = ir.Function(self.module, exp_ty, name="log")
+        
+        pow_ty = ir.FunctionType(self.f64, [self.f64, self.f64])
+        self.pow_func = ir.Function(self.module, pow_ty, name="pow")
+        
 
-        # ---- libm math functions
-        math_ty      = ir.FunctionType(self.float_type, [self.float_type])
-        self.fn_sqrt = ir.Function(self.module, math_ty, name="sqrt")
-        self.fn_exp  = ir.Function(self.module, math_ty, name="exp")
-
-    # ═══════════════════════════════════════════════════════════════
-    #  Type helpers
-    # ═══════════════════════════════════════════════════════════════
-
-    def _llvm_type(self, type_str: str) -> ir.Type:
-        """Recursively convert a C* type string to an llvmlite IR type."""
-        if type_str == "int":
-            return self.i32_type
-        if type_str == "float":
-            return self.float_type
-        if type_str == "bool":
-            return self.bool_type
-        if type_str.startswith("["):
-            inner = type_str[1:-1]
-            # For function parameter types, arrays decay to pointer-to-element
-            return self._llvm_type(inner).as_pointer()
-        raise CodeGenError(f"Unknown type: '{type_str}'")
-
-    def _elem_type(self, type_str: str) -> ir.Type:
-        """Return the element LLVM type for an array C* type string."""
-        if not type_str.startswith("["):
-            raise CodeGenError(f"Not an array type: '{type_str}'")
-        return self._llvm_type(type_str[1:-1])
-
-    # ═══════════════════════════════════════════════════════════════
-    #  Visitor dispatch
-    # ═══════════════════════════════════════════════════════════════
-
+    # =====================================================
+    # CORE
+    # =====================================================
     def generate(self, ast):
-        self._visit(ast)
+        self.visit(ast)
+        print(self.module)
 
-    def _visit(self, node):
+    def visit(self, node):
         if node is None:
             return None
-        method = getattr(self, f"_visit_{type(node).__name__}", None)
-        if method is None:
-            raise CodeGenError(f"No codegen rule for '{type(node).__name__}'")
-        return method(node)
+        return getattr(self, f"visit_{type(node).__name__}", self.generic_visit)(node)
 
-    # ═══════════════════════════════════════════════════════════════
-    #  Top-level program → main()
-    # ═══════════════════════════════════════════════════════════════
+    def generic_visit(self, node):
+        raise Exception(f"No visit_{type(node).__name__}")
 
-    def _visit_Program(self, node: Program):
-        main_fn = ir.Function(
-            self.module,
-            ir.FunctionType(self.i32_type, []),
-            name="main",
-        )
-        entry_block = main_fn.append_basic_block(name="entry")
-        self.builder = ir.IRBuilder(entry_block)
+    # =====================================================
+    # PROGRAM
+    # =====================================================
+    def visit_Program(self, node):
+        fn_type = ir.FunctionType(self.i32, [])
+        main = ir.Function(self.module, fn_type, name="main")
 
-        # Allocate + store the printf format string
-        fmt_arr_ty  = ir.ArrayType(ir.IntType(8), len(self._fmt_bytes))
-        self._fmt_ptr = self.builder.alloca(fmt_arr_ty, name="fmt")
-        self.builder.store(
-            ir.Constant(fmt_arr_ty, self._fmt_bytes),
-            self._fmt_ptr,
-        )
+        block = main.append_basic_block("entry")
+        self.builder = ir.IRBuilder(block)
 
         for stmt in node.statements:
-            self._visit(stmt)
+            self.visit(stmt)
 
         if not self.builder.block.is_terminated:
-            self.builder.ret(ir.Constant(self.i32_type, 0))
+            self.builder.ret(ir.Constant(self.i32, 0))
 
-    # ═══════════════════════════════════════════════════════════════
-    #  Function declaration
-    # ═══════════════════════════════════════════════════════════════
+    # =====================================================
+    # LITERALS
+    # =====================================================
+    def visit_Number(self, node):
+        return ir.Constant(self.i32, int(node.value))
 
-    def _visit_Function(self, node: Function):
-        # Build parameter LLVM types (arrays decay to pointers)
-        param_types = [self._llvm_type(p["type"]) for p in node.params]
-        ret_type    = self._llvm_type(node.return_type)
-        fn_type     = ir.FunctionType(ret_type, param_types)
-        func        = ir.Function(self.module, fn_type, name=node.name)
+    def visit_FloatNode(self, node):
+        return ir.Constant(self.f64, float(node.value))
 
-        # Save outer state
-        old_builder   = self.builder
-        old_variables = self.variables.copy()
+    def visit_BoolNode(self, node):
+        return ir.Constant(self.i32, 1 if node.value else 0)
 
-        entry_block   = func.append_basic_block(name="entry")
-        self.builder  = ir.IRBuilder(entry_block)
-        self.variables = {}
+    def visit_StringNode(self, node):
+        text = bytearray((node.value + "\0").encode())
 
-        for ir_arg, param in zip(func.args, node.params):
-            ir_arg.name = param["name"]
-            ptr = self.builder.alloca(ir_arg.type, name=param["name"])
-            self.builder.store(ir_arg, ptr)
-            self.variables[param["name"]] = ptr
+        ty = ir.ArrayType(ir.IntType(8), len(text))
+        name = f"str_{len(self.module.globals)}"
 
-        for stmt in node.body:
-            self._visit(stmt)
+        glob = ir.GlobalVariable(self.module, ty, name=name)
+        glob.global_constant = True
+        glob.initializer = ir.Constant(ty, text)
 
-        # Restore outer state
-        self.variables = old_variables
-        self.builder   = old_builder
+        return self.builder.gep(glob, [self.i32(0), self.i32(0)])
 
-    # ═══════════════════════════════════════════════════════════════
-    #  Calls (including built-in math)
-    # ═══════════════════════════════════════════════════════════════
+    # ============
+    # VARIABLES 
+    # =========
+    def visit_VarDecl(self, node):
+        val = self.visit(node.value)
+        # allocate memory based on the ACTUAL type of the value
+        ptr = self.builder.alloca(val.type, name=node.name)
+        self.variables[node.name] = ptr
+        self.builder.store(val, ptr)
 
-    def _visit_Call(self, node: Call):
-        if node.name == "sqrt":
-            arg = self._coerce_float(self._visit(node.args[0]))
-            return self.builder.call(self.fn_sqrt, [arg])
-        if node.name == "exp":
-            arg = self._coerce_float(self._visit(node.args[0]))
-            return self.builder.call(self.fn_exp, [arg])
-
-        func = self.module.globals.get(node.name)
-        if func is None:
-            raise CodeGenError(f"Undefined function '{node.name}'")
-
-        args = []
-        for a in node.args:
-            v = self._visit(a)
-            # Decay a fixed-size local array to a pointer before passing
-            v = self._decay_to_pointer(v)
-            args.append(v)
-        return self.builder.call(func, args)
-
-    # ═══════════════════════════════════════════════════════════════
-    #  Binary operations & Tensor Addition
-    # ═══════════════════════════════════════════════════════════════
-
-    def _visit_BinaryOp(self, node: BinaryOp):
-        l = self._visit(node.left)
-        r = self._visit(node.right)
-
-        # Milestone 2: Tensor Addition (Level 6 Logic)
-        if node.op == TokenType.PLUS and isinstance(l.type, ir.PointerType) and isinstance(l.type.pointee, ir.ArrayType):
-            return self._generate_tensor_addition(l, r)
-
-        # Promote int → float if either side is float
-        if l.type == self.float_type or r.type == self.float_type:
-            l = self._coerce_float(l)
-            r = self._coerce_float(r)
-            is_float = True
+    def visit_Assignment(self, node):
+        if getattr(node, "target", None):
+        
+            ptr = self.get_ptr(node.target)
         else:
-            is_float = False
+            
+            if node.name not in self.variables:
+                raise Exception(f"Undefined variable {node.name}")
+            ptr = self.variables[node.name]
+        val = self.visit(node.value)
+        self.builder.store(val, ptr)
 
-        op = node.op
-        if op == TokenType.PLUS:
+    def visit_Variable(self, node):
+        if node.name not in self.variables:
+            raise Exception(f"Undefined variable {node.name}")
+        return self.builder.load(self.variables[node.name])
+    
+    def visit_ExpressionStatement(self, node):
+        return self.visit(node.expression)
+
+    # =====================================================
+    # BINARY OPERATIONS
+    # =====================================================
+    def visit_BinaryOp(self, node):
+        l = self.visit(node.left)
+        r = self.visit(node.right)
+
+        is_float = isinstance(l.type, ir.DoubleType) or isinstance(r.type, ir.DoubleType)
+
+        if node.op == TokenType.PLUS:
             return self.builder.fadd(l, r) if is_float else self.builder.add(l, r)
-        if op == TokenType.MINUS:
+
+        if node.op == TokenType.MINUS:
             return self.builder.fsub(l, r) if is_float else self.builder.sub(l, r)
-        if op == TokenType.MULTIPLY:
+
+        if node.op == TokenType.MULTIPLY:
             return self.builder.fmul(l, r) if is_float else self.builder.mul(l, r)
-        if op == TokenType.DIVIDE:
+
+        if node.op == TokenType.DIVIDE:
             return self.builder.fdiv(l, r) if is_float else self.builder.sdiv(l, r)
 
-        # Milestone 3: Comparisons return formal i1 (bool)
-        if op in (TokenType.GREATER, TokenType.LESS, TokenType.EQUAL_EQUAL):
-            ops_map = {
-                TokenType.GREATER:    ">",
-                TokenType.LESS:       "<",
-                TokenType.EQUAL_EQUAL: "==",
-            }
-            predicate = ops_map[op]
+        if node.op in (TokenType.GREATER, TokenType.LESS, TokenType.EQUAL_EQUAL):
             if is_float:
-                return self.builder.fcmp_ordered(predicate, l, r)
+                op = {
+                    TokenType.GREATER: ">",
+                    TokenType.LESS: "<",
+                    TokenType.EQUAL_EQUAL: "=="
+                }[node.op]
+                cmp = self.builder.fcmp_ordered(op, l, r)
             else:
-                return self.builder.icmp_signed(predicate, l, r)
+                op = {
+                    TokenType.GREATER: ">",
+                    TokenType.LESS: "<",
+                    TokenType.EQUAL_EQUAL: "=="
+                }[node.op]
+                cmp = self.builder.icmp_signed(op, l, r)
 
-        raise CodeGenError(f"Unknown binary operator: {op}")
+            return self.builder.zext(cmp, self.i32)
 
-    def _generate_tensor_addition(self, array_a, array_b):
-        """Level 6 Milestone: Loop generation for matrix addition."""
-        size = array_a.type.pointee.count
-        res_ptr = self.builder.alloca(array_a.type.pointee, name="sum_res")
-        idx_ptr = self.builder.alloca(self.i32_type, name="i")
-        self.builder.store(ir.Constant(self.i32_type, 0), idx_ptr)
+    # =====
+    # PRINT
+    # =========
+    def visit_Print(self, node):
+        val = self.visit(node.value)
+
+        if val.type == self.i32:
+            fmt = "%d\n\0"
+        elif val.type == self.f64:
+            fmt = "%f\n\0"
+        else:
+            fmt = "%s\n\0"
+
+        fmt_ptr = self._fmt(fmt)
+        self.builder.call(self.printf, [fmt_ptr, val])
+
+    def _fmt(self, s):
+        data = bytearray(s.encode())
+        ty = ir.ArrayType(ir.IntType(8), len(data))
+
+        glob = ir.GlobalVariable(self.module, ty, name=f"fmt_{len(self.module.globals)}")
+        glob.global_constant = True
+        glob.initializer = ir.Constant(ty, data)
+
+        return self.builder.gep(glob, [self.i32(0), self.i32(0)])
+
+    # ============
+    # CONTROL FLOW
+    # ==============
+    def visit_If(self, node):
+        cond = self.visit(node.condition)
+        cond = self.builder.icmp_signed("!=", cond, self.i32(0))
+
+        then_bb = self.builder.append_basic_block("then")
+        else_bb = self.builder.append_basic_block("else") if node.else_body else None
+        end_bb = self.builder.append_basic_block("end")
+
+        self.builder.cbranch(cond, then_bb, else_bb or end_bb)
+
+        self.builder.position_at_end(then_bb)
+        for s in node.body:
+            self.visit(s)
+        if not self.builder.block.is_terminated:
+            self.builder.branch(end_bb)
+
+        if else_bb:
+            self.builder.position_at_end(else_bb)
+            for s in node.else_body:
+                self.visit(s)
+            if not self.builder.block.is_terminated:
+                self.builder.branch(end_bb)
+
+        self.builder.position_at_end(end_bb)
+
+    def visit_While(self, node):
+        cond_bb = self.builder.append_basic_block("cond")
+        body_bb = self.builder.append_basic_block("body")
+        end_bb = self.builder.append_basic_block("end")
+
+        self.builder.branch(cond_bb)
+
+        self.builder.position_at_end(cond_bb)
+        cond = self.visit(node.condition)
+        cond = self.builder.icmp_signed("!=", cond, self.i32(0))
+        self.builder.cbranch(cond, body_bb, end_bb)
+
+        self.builder.position_at_end(body_bb)
+        for s in node.body:
+            self.visit(s)
+        self.builder.branch(cond_bb)
+
+        self.builder.position_at_end(end_bb)
+
+    # =============
+    # FUNCTIONS 
+    # =============
+    def visit_Function(self, node):
+        ret_ty = self.f64 if node.return_type == "float" else self.i32
+
+        # dynamically determine parameter types
+        param_types = []
+        for p in node.params:
+            if p["type"] == "float":
+                param_types.append(self.f64)
+            elif p["type"] in self.classes:
+                
+                param_types.append(self.classes[p["type"]]["type"].as_pointer())
+            else:
+                param_types.append(self.i32)
+
+        fn_type = ir.FunctionType(ret_ty, param_types)
+        func = ir.Function(self.module, fn_type, name=node.name)
+
+        block = func.append_basic_block("entry")
+        old_builder = self.builder
+        old_vars = self.variables.copy()
+
+        self.builder = ir.IRBuilder(block)
+        self.variables = {}
+
+        for i, p in enumerate(node.params):
+            if p["name"] == "self":
+                
+                self.variables[p["name"]] = func.args[i]
+            else:
+                ptr = self.builder.alloca(param_types[i], name=p["name"])
+                self.builder.store(func.args[i], ptr)
+                self.variables[p["name"]] = ptr
+
+        for stmt in node.body:
+            self.visit(stmt)
+
+        if not self.builder.block.is_terminated:
+            self.builder.ret(ir.Constant(ret_ty, 0))
+
+        self.builder = old_builder
+        self.variables = old_vars
+
+    def visit_Return(self, node):
+        self.builder.ret(self.visit(node.value))
+
+
+# =====================================================
+    # CALLS (LEN & METHODS)
+    # =====================================================
+    def visit_Call(self, node):
         
-        cond_b = self.builder.append_basic_block("loop.cond")
-        body_b = self.builder.append_basic_block("loop.body")
-        end_b = self.builder.append_basic_block("loop.end")
-        
-        self.builder.branch(cond_b)
-        self.builder.position_at_end(cond_b)
-        curr_idx = self.builder.load(idx_ptr)
-        cmp = self.builder.icmp_signed("<", curr_idx, ir.Constant(self.i32_type, size))
-        self.builder.cbranch(cmp, body_b, end_b)
-        
-        self.builder.position_at_end(body_b)
-        a_ptr = self.builder.gep(array_a, [ir.Constant(self.i32_type, 0), curr_idx])
-        b_ptr = self.builder.gep(array_b, [ir.Constant(self.i32_type, 0), curr_idx])
-        sum_val = self.builder.fadd(self.builder.load(a_ptr), self.builder.load(b_ptr))
-        res_elem_ptr = self.builder.gep(res_ptr, [ir.Constant(self.i32_type, 0), curr_idx])
-        self.builder.store(sum_val, res_elem_ptr)
-        
-        self.builder.store(self.builder.add(curr_idx, ir.Constant(self.i32_type, 1)), idx_ptr)
-        self.builder.branch(cond_b)
-        
-        self.builder.position_at_end(end_b)
-        return self.builder.load(res_ptr)
-
-    # ═══════════════════════════════════════════════════════════════
-    #  Variable declaration & assignment
-    # ═══════════════════════════════════════════════════════════════
-
-    def _visit_VarDecl(self, node: VarDecl):
-        val = self._visit(node.value)
-        ptr = self.builder.alloca(val.type, name=node.name)
-        self.builder.store(val, ptr)
-        self.variables[node.name] = ptr
-
-    def _visit_Assignment(self, node: Assignment):
-        val = self._visit(node.value)
-        ptr = self.variables[node.name]
-        self.builder.store(val, ptr)
-
-    # ═══════════════════════════════════════════════════════════════
-    #  Array literals
-    # ═══════════════════════════════════════════════════════════════
-
-    def _visit_ArrayLiteral(self, node: ArrayLiteral):
-        """CodeGen: Builds the actual LLVM memory for the array."""
-        elements = [self._visit(el) for el in node.elements]
-        elem_ty = elements[0].type
-        arr_ty = ir.ArrayType(elem_ty, len(elements))
-        
-        # Level 6 Fix: Build in memory if math (like -0.2) is present
-        if any(not isinstance(e, ir.Constant) for e in elements):
-            tmp_ptr = self.builder.alloca(arr_ty, name="arr_literal_tmp")
-            for i, val in enumerate(elements):
-                idx = ir.Constant(self.i32_type, i)
-                zero = ir.Constant(self.i32_type, 0)
-                ptr = self.builder.gep(tmp_ptr, [zero, idx], inbounds=True)
-                self.builder.store(val, ptr)
-            return self.builder.load(tmp_ptr)
+        # 1. Handle Method Calls (e.g. n.calculate())
+        if getattr(node, "object", None) is not None:
+            obj_ptr = self.variables[node.object.name]
+            class_name = obj_ptr.type.pointee.name
             
-        return ir.Constant(arr_ty, elements)
+            func_name = f"{class_name}_{node.name}"
+            func = self.module.globals.get(func_name)
+            
+            args = [obj_ptr] + [self.visit(a) for a in node.args]
+            return self.builder.call(func, args)
+        
+        # handle load_csv built-in function
+        if node.name == "load_csv":
+            filename = self.visit(node.args[0])
+            num_values = self.visit(node.args[1])
+            return self.builder.call(self.load_csv_func, [filename, num_values])
 
-    # ═══════════════════════════════════════════════════════════════
-    #  Array indexing — PRESERVED ORIGINAL FIX
-    # ═══════════════════════════════════════════════════════════════
+        if node.name in self.classes:
+            class_info = self.classes[node.name]
+            ptr = self.builder.alloca(class_info["type"], name=f"new_{node.name}")
+            
+            for i, default_node in enumerate(class_info["defaults"]):
+                if default_node: 
+                    val = self.visit(default_node) 
+                    field_ptr = self.builder.gep(ptr, [self.i32(0), self.i32(i)], inbounds=True)
+                    
+                    
+                    if isinstance(val.type, ir.ArrayType) and isinstance(field_ptr.type.pointee, ir.PointerType):
+                        
+                        temp_arr = self.builder.alloca(val.type)
+                        self.builder.store(val, temp_arr)
+                        
+                        val = self.builder.bitcast(temp_arr, field_ptr.type.pointee)
+                    
+                    
+                    self.builder.store(val, field_ptr) 
+            
+            return self.builder.load(ptr)
 
-    def _visit_ArrayIndex(self, node: ArrayIndex):
-        """Emit a GEP + load for base[index]."""
-        # Load the base variable's storage pointer
-        base_storage = self.variables.get(self._base_name(node.name))
-        if base_storage is None:
-            # base is the result of a previous ArrayIndex (already an IR value)
-            base_val = self._visit_array_base(node.name)
-        else:
-            base_val = None   # we'll handle it below
-
-        idx = self._visit(node.index)
-
-        if base_val is not None:
-            # base_val should already be a pointer to element
-            elem_ptr = self.builder.gep(base_val, [idx], inbounds=True)
-            return self.builder.load(elem_ptr)
-
-        # base_storage is the alloca pointer
-        pointee_ty = base_storage.type.pointee  # what the alloca holds
-
-        if isinstance(pointee_ty, ir.ArrayType):
-            # Case A: [N x T]* — use double-index GEP
-            zero     = ir.Constant(self.i32_type, 0)
-            elem_ptr = self.builder.gep(base_storage, [zero, idx], inbounds=True)
-            return self.builder.load(elem_ptr)
-        else:
-            # Case B / C: T** (or T*) — load the pointer first, then GEP
-            inner_ptr = self.builder.load(base_storage)   # → T*
-            elem_ptr  = self.builder.gep(inner_ptr, [idx], inbounds=True)
-            return self.builder.load(elem_ptr)
-
-    def _base_name(self, node) -> str | None:
-        """Return the variable name if node is a Variable, else None."""
-        from parser import Variable as VarNode
-        return node.name if isinstance(node, VarNode) else None
-
-    def _visit_array_base(self, node):
-        """Visit an ArrayIndex node but return the element pointer."""
-        from parser import Variable as VarNode, ArrayIndex as AINode
-
-        if isinstance(node, VarNode):
-            storage = self.variables[node.name]
-            pointee = storage.type.pointee
-            if isinstance(pointee, ir.ArrayType):
-                zero = ir.Constant(self.i32_type, 0)
-                # Return the array pointer itself so caller can index further
-                return self.builder.gep(storage, [zero, zero], inbounds=True)
+        
+        if node.name == "len":
+            arg = self.visit(node.args[0])
+            if isinstance(arg.type, ir.ArrayType):
+                length = arg.type.count
+            elif hasattr(arg.type, "pointee") and isinstance(arg.type.pointee, ir.ArrayType):
+                length = arg.type.pointee.count
             else:
-                return self.builder.load(storage)   # T*
+                length = 0 
+            return ir.Constant(self.i32, length)
 
-        if isinstance(node, AINode):
-            # Recursively get a pointer into the sub-array
-            idx     = self._visit(node.index)
-            base    = self._visit_array_base(node.name)
-            return self.builder.gep(base, [idx], inbounds=True)
+        
+        if node.name in ["exp", "sqrt", "log"]:
+            arg = self.visit(node.args[0])
+            if arg.type != self.f64:
+                arg = self.builder.sitofp(arg, self.f64)
+                
+            if node.name == "exp":
+                return self.builder.call(self.exp_func, [arg])
+            elif node.name == "sqrt":
+                return self.builder.call(self.sqrt_func, [arg])
+            elif node.name == "log":
+                return self.builder.call(self.log_func, [arg])
 
-        raise CodeGenError(f"Unexpected base in array index chain: {type(node).__name__}")
+        if node.name == "pow":
+            base = self.visit(node.args[0])
+            exp_val = self.visit(node.args[1])
+            if base.type != self.f64:
+                base = self.builder.sitofp(base, self.f64)
+            if exp_val.type != self.f64:
+                exp_val = self.builder.sitofp(exp_val, self.f64)
+            return self.builder.call(self.pow_func, [base, exp_val])
 
-    # ═══════════════════════════════════════════════════════════════
-    #  Leaf nodes
-    # ═══════════════════════════════════════════════════════════════
+        
+        func = self.module.globals.get(node.name)
+        if func is None:
+            raise Exception(f"Undefined function {node.name}")
 
-    def _visit_Variable(self, node: Variable):
-        ptr = self.variables.get(node.name)
-        if ptr is None:
-            raise CodeGenError(f"Undefined variable '{node.name}'")
+        args = [self.visit(a) for a in node.args]
+        return self.builder.call(func, args)
+    
+    
+
+    # ===============
+    # MEMBER ACCESS
+    # ===============
+    def visit_MemberAccess(self, node):
+        """Pulls a specific field out of an object (e.g. obj.field)."""
+        obj_ptr = self.variables[node.object.name]
+        class_name = obj_ptr.type.pointee.name
+        
+        field_idx = self.classes[class_name]["indices"][node.member]
+        
+        ptr = self.builder.gep(obj_ptr, [self.i32(0), self.i32(field_idx)], inbounds=True)
         return self.builder.load(ptr)
 
-    def _visit_Number(self,    node: Number):    return ir.Constant(self.i32_type,   node.value)
-    def _visit_FloatNode(self, node: FloatNode): return ir.Constant(self.float_type, node.value)
-    def _visit_Boolean(self,   node: Boolean):   return ir.Constant(self.bool_type,  1 if node.value else 0)
+    # ==========
+    # FOR LOOPS 
+    # ==========
+    
+    def visit_For(self, node):
+        limit_val = self.visit(node.iterable) 
+        start = ir.Constant(self.i32, 0)
+        i_ptr = self.builder.alloca(self.i32, name=node.var)
+        self.builder.store(start, i_ptr)
 
-    # ═══════════════════════════════════════════════════════════════
-    #  Control flow
-    # ═══════════════════════════════════════════════════════════════
+        self.variables[node.var] = i_ptr # register loop variable
 
-    def _visit_While(self, node: While):
-        cond_block = self.builder.append_basic_block("while.cond")
-        body_block = self.builder.append_basic_block("while.body")
-        end_block  = self.builder.append_basic_block("while.end")
+        cond_bb = self.builder.append_basic_block("for.cond")
+        body_bb = self.builder.append_basic_block("for.body")
+        end_bb = self.builder.append_basic_block("for.end")
 
-        self.builder.branch(cond_block)
-        self.builder.position_at_end(cond_block)
+        self.builder.branch(cond_bb)
+        self.builder.position_at_end(cond_bb)
+        i = self.builder.load(i_ptr)
+        cond = self.builder.icmp_signed("<", i, limit_val)
+        self.builder.cbranch(cond, body_bb, end_bb)
 
-        cond_val = self._visit(node.condition)
-        # Level 6: Use _to_bool helper
-        cmp = self._to_bool(cond_val)
+        self.builder.position_at_end(body_bb)
+        for s in node.body:
+            self.visit(s)
 
-        self.builder.cbranch(cmp, body_block, end_block)
-        self.builder.position_at_end(body_block)
+        i = self.builder.load(i_ptr)
+        self.builder.store(self.builder.add(i, self.i32(1)), i_ptr)
+        self.builder.branch(cond_bb)
+        self.builder.position_at_end(end_bb)
 
-        for stmt in node.body:
-            self._visit(stmt)
-        if not self.builder.block.is_terminated:
-            self.builder.branch(cond_block)
+    # ============================
+    # MULTI-DIMENSIONAL ARRAYS 
+    # ===========================
+    def get_ptr(self, node):
+        """Recursively finds the exact memory address for variables, class fields, and chained array indices."""
+        if type(node).__name__ == "Variable":
+            return self.variables[node.name]
+            
+        elif type(node).__name__ == "MemberAccess":
+            obj_ptr = self.variables[node.object.name]
+            class_name = obj_ptr.type.pointee.name
+            field_idx = self.classes[class_name]["indices"][node.member]
+            return self.builder.gep(obj_ptr, [self.i32(0), self.i32(field_idx)], inbounds=True)
+            
+        elif type(node).__name__ == "ArrayIndex":
+            base_ptr = self.get_ptr(node.array)
+            idx = self.visit(node.index)
+            
+            
+            if isinstance(base_ptr.type.pointee, ir.PointerType):
+                actual_ptr = self.builder.load(base_ptr)
+                return self.builder.gep(actual_ptr, [idx], inbounds=True)
+            else:
+                
+                return self.builder.gep(base_ptr, [self.i32(0), idx], inbounds=True)
+            
+            
+        raise Exception(f"Cannot get pointer for {type(node).__name__}")
 
-        self.builder.position_at_end(end_block)
+    def visit_ArrayIndex(self, node):
+        """Pulls a value out of an array at a specific index."""
+       
+        ptr = self.get_ptr(node)
+        return self.builder.load(ptr) 
 
-    def _visit_If(self, node: If):
-        cond_val = self._visit(node.condition)
-        cmp = self._to_bool(cond_val)
 
-        then_block = self.builder.append_basic_block("if.then")
-        else_block = self.builder.append_basic_block("if.else")
-        merge_block = self.builder.append_basic_block("if.merge")
+    def visit_ClassDecl(self, node):
+        """Defines a new Object Struct in memory."""
+        class_type = self.module.context.get_identified_type(node.name)
+        
+        field_types = []
+        field_indices = {}
+        field_defaults = [] 
+        
+        index = 0
+        for member in node.body:
+            if type(member).__name__ == "VarDecl":
+                if member.type_annotation == "float":
+                    ll_type = self.f64
+                elif member.type_annotation == "int":
+                    ll_type = self.i32
+                elif type(member.value).__name__ == "ArrayLiteral":
+                    base_type = self.f64 if "float" in member.type_annotation else self.i32
+                    
+                    
+                    dims = []
+                    curr = member.value
+                    while type(curr).__name__ == "ArrayLiteral":
+                        dims.append(len(curr.elements))
+                        curr = curr.elements[0] if len(curr.elements) > 0 else None
+                        
+                    
+                    if type(member).__name__ == "VarDecl":
+                      if member.type_annotation == "float":
+                       ll_type = self.f64
+                elif member.type_annotation == "int":
+                    ll_type = self.i32
+                
+                
+                elif member.type_annotation == "[float]":
+                    ll_type = self.f64.as_pointer()
+                
+                
+                elif type(member.value).__name__ == "ArrayLiteral":
+                    base_type = self.f64 if "float" in member.type_annotation else self.i32
+                    
+                else:
+                    ll_type = self.i8_ptr 
+                
+                field_types.append(ll_type)
+                field_indices[member.name] = index
+                field_defaults.append(member.value) 
+                index += 1
+                
+        class_type.set_body(*field_types)
+        
+        self.classes[node.name] = {
+            "type": class_type,
+            "indices": field_indices,
+            "defaults": field_defaults 
+        }
 
-        self.builder.cbranch(cmp, then_block, else_block)
+        
+        old_builder = self.builder
+        
+        
+        for member in node.body:
+            if type(member).__name__ == "Function":
+                
+                member.name = f"{node.name}_{member.name}"
+                
+                self.visit(member) 
+                
+        
+        self.builder = old_builder
+        
 
-        self.builder.position_at_end(then_block)
-        for stmt in node.body:
-            self._visit(stmt)
-        if not self.builder.block.is_terminated:
-            self.builder.branch(merge_block)
+    def visit_MemberAccess(self, node):
+        """Pulls a specific field out of an object (e.g. obj.field)."""
+        
+        obj_ptr = self.variables[node.object.name]
+        
+        
+        class_name = obj_ptr.type.pointee.name
+        
+        
+        field_idx = self.classes[class_name]["indices"][node.member]
+        
+        
+        ptr = self.builder.gep(obj_ptr, [self.i32(0), self.i32(field_idx)], inbounds=True)
+        return self.builder.load(ptr)
 
-        self.builder.position_at_end(else_block)
-        if node.else_body:
-            for stmt in node.else_body:
-                self._visit(stmt)
-        if not self.builder.block.is_terminated:
-            self.builder.branch(merge_block)
-
-        self.builder.position_at_end(merge_block)
-
-    # ═══════════════════════════════════════════════════════════════
-    #  Output & return
-    # ═══════════════════════════════════════════════════════════════
-
-    def _visit_Return(self, node: Return):
-        self.builder.ret(self._visit(node.value))
-
-    def _visit_Print(self, node: Print):
-        val = self._visit(node.value)
-        val = self._coerce_float(val)           
-        fmt = self.builder.bitcast(self._fmt_ptr, self.i8_ptr)
-        self.builder.call(self.printf, [fmt, val])
-
-    # ═══════════════════════════════════════════════════════════════
-    #  Utilities
-    # ═══════════════════════════════════════════════════════════════
-
-    def _coerce_float(self, val: ir.Value) -> ir.Value:
-        """Convert an i32 to double if necessary."""
-        if val.type == self.i32_type:
-            return self.builder.sitofp(val, self.float_type)
-        return val
-
-    def _to_bool(self, val: ir.Value) -> ir.Value:
-        """Helper to convert any type to an i1 boolean for branching."""
-        if val.type == self.bool_type:
-            return val
-        if val.type == self.float_type:
-            return self.builder.fcmp_ordered("!=", val, ir.Constant(self.float_type, 0.0))
-        return self.builder.icmp_signed("!=", val, ir.Constant(self.i32_type, 0))
-
-    def _decay_to_pointer(self, val: ir.Value) -> ir.Value:
-        """If val is a fixed-size array value [N x T], GEP to its first element."""
-        if isinstance(val.type, ir.ArrayType):
-            # val is a constant array — we need to alloca it first
-            tmp = self.builder.alloca(val.type)
-            self.builder.store(val, tmp)
-            zero = ir.Constant(self.i32_type, 0)
-            return self.builder.gep(tmp, [zero, zero], inbounds=True)
-        return val
-
-    # ═══════════════════════════════════════════════════════════════
-    #  JIT execution
-    # ═══════════════════════════════════════════════════════════════
-
+    
+    
     def execute(self):
-        llvm_ir  = str(self.module)
-        mod      = llvm.parse_assembly(llvm_ir)
+        llvm_ir = str(self.module)
+        mod = llvm.parse_assembly(llvm_ir)
         mod.verify()
 
-        target   = llvm.Target.from_default_triple()
-        target_machine = target.create_target_machine()
-        engine   = llvm.create_mcjit_compiler(mod, target_machine)
-        engine.finalize_object()
-        engine.run_static_constructors()
+        target_machine = llvm.Target.from_default_triple().create_target_machine()
+        with llvm.create_mcjit_compiler(mod, target_machine) as ee:
+            ee.finalize_object()
+            func_ptr = ee.get_function_address("main")
+            
+            from ctypes import CFUNCTYPE, c_int
+            cfunc = CFUNCTYPE(c_int)(func_ptr)
+            
+            print("\n--- Running Program ---")
+            result = cfunc()
+            print(f"--- Program Exited with code {result} ---")
 
-        import ctypes
-        main_ptr = engine.get_function_address("main")
-        ctypes.CFUNCTYPE(ctypes.c_int)(main_ptr)()
+    
+    # =====================================================
+    # ARRAYS (DYNAMIC MEMORY)
+    # =====================================================
+    def visit_ArrayLiteral(self, node):
+        elements = [self.visit(el) for el in node.elements]
+        if not elements:
+            return ir.Constant(ir.ArrayType(self.i32, 0), [])
+
+        elem_ty = elements[0].type
+        arr_ty = ir.ArrayType(elem_ty, len(elements))
+
+        # --- THE LLVM MEMORY OPTIMIZATION  ---
+        # If the array is purely raw numbers (like our massive CSV dataset)
+        # we skip the 40,000 store instructions and package it instantly
+        if all(isinstance(val, ir.Constant) for val in elements):
+            return ir.Constant(arr_ty, elements)
+        
+        # Build array dynamically on the stack 
+        tmp_ptr = self.builder.alloca(arr_ty, name="arr_literal_tmp")
+        for i, val in enumerate(elements):
+            idx = ir.Constant(self.i32, i)
+            zero = ir.Constant(self.i32, 0)
+            ptr = self.builder.gep(tmp_ptr, [zero, idx], inbounds=True)
+            self.builder.store(val, ptr)
+            
+        return self.builder.load(tmp_ptr)
+    
+    def execute(self):
+        """Compiles the IR and runs the main function."""
+        
+        llvm_ir = str(self.module)
+        mod = llvm.parse_assembly(llvm_ir)
+        mod.verify()
+
+        
+        target_machine = llvm.Target.from_default_triple().create_target_machine()
+
+        
+        pto = llvm.create_pipeline_tuning_options(speed_level=3)
+        pb = llvm.create_pass_builder(target_machine, pto)
+        pm = pb.getModulePassManager()
+        pm.run(mod, pb)
+        
+
+        
+        with llvm.create_mcjit_compiler(mod, target_machine) as ee:
+            ee.finalize_object()
+            
+            
+            func_ptr = ee.get_function_address("main")
+            
+           
+            from ctypes import CFUNCTYPE, c_int
+            import time  
+            
+            cfunc = CFUNCTYPE(c_int)(func_ptr)
+            
+            print("\n--- Running Program ---")
+            
+            start_time = time.time() 
+            result = cfunc()
+            end_time = time.time() 
+            
+            print(f"--- Program Exited with code {result} ---")
+            print(f".cstar took: {end_time - start_time:.6f} seconds")
+            return result
+    
+    #testing something 
+
+    def save_object(self, filename):
+        """Compiles the LLVM IR down to a native Object File (.obj / .o)."""
+        
+        llvm_ir = str(self.module)
+        mod = llvm.parse_assembly(llvm_ir)
+        mod.verify()
+        
+        target = llvm.Target.from_default_triple()
+        target_machine = target.create_target_machine()
+
+    
+        obj_code = target_machine.emit_object(mod)
+
+        with open(filename, "wb") as f:
+            f.write(obj_code)
+            
+        print(f"Native Object File saved to: {filename}")
