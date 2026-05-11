@@ -109,4 +109,6 @@ def main():
 
     print("Success! (Pipeline is completely wired up)")
 
+
+if __name__ == "__main__":
     main()

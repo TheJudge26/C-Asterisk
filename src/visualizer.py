@@ -9,7 +9,7 @@ class ASTPrinter:
         self.indent = ""
 
     def print_node(self, node, label="", is_last=True):
-        marker = "└── " if is_last else "├── "
+        marker = "`-- " if is_last else "|-- "
         prefix = f"{label}: " if label else ""
         
         if node is None:
@@ -26,7 +26,7 @@ class ASTPrinter:
 
         # Prepare for children
         old_indent = self.indent
-        self.indent += "    " if is_last else "│   "
+        self.indent += "    " if is_last else "|   "
 
         # Logic for specific nodes to find their "children"
         if isinstance(node, Program):
