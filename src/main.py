@@ -36,19 +36,25 @@ def main():
 
     # 2. Parser
     print("2. Parsing...")
-    try:
-        parser = Parser(tokens)
-        ast = parser.parse()
-        print("AST Generated Successfully")
+    
+    parser = Parser(tokens)
+    ast = parser.parse()
 
-        print("\n--- ABSTRACT SYNTAX TREE (AST) ---")
-        printer = ASTPrinter()
-        printer.print_node(ast)
-        print("----------------------------------\n")
-
-    except ParserError as e:
-        print(f"[Parser Error] {e}")
+    # --- PANIC MODE ERROR CHECK ---
+    if parser.errors:
+        print("\n--- PARSER ERRORS ---")
+        for err in parser.errors:
+            print(err)
+        print("-----------------------\n")
+        print("Compilation failed.")
         sys.exit(1)
+
+    print("AST Generated Successfully")
+
+    print("\n--- ABSTRACT SYNTAX TREE (AST) ---")
+    printer = ASTPrinter()
+    printer.print_node(ast)
+    print("----------------------------------\n")
 
     # 3. Semantic Analysis
     print("3. Semantic Analysis...")

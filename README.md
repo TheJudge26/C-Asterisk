@@ -24,7 +24,7 @@ C* is directly inspired by **Mojo** (developed by Chris Lattner, the original cr
 
 ---
 
-## ⚡ The MNIST Benchmark: ~20x Faster Than Pure Python
+##  The MNIST Benchmark: ~20x Faster Than Pure Python
 
 To prove C* isn't just theoretical, we implemented a **Single-Layer Perceptron** (a neural network) in pure C* and raced it against the mathematically identical implementation in pure Python. Both programs trained on 100 images from the MNIST handwritten digit dataset (binary classification: 0 vs. 1) and predicted on 10 unseen test images.
 
@@ -315,7 +315,7 @@ C* Source Code
        ▼
 ┌─────────────┐
 │  LLVM       │  Applies optimization passes and compiles IR to
-│  BACKEND    │  native x86-64 machine code ⚡
+│  BACKEND    │  native x86-64 machine code 
 └─────────────┘
 ```
 

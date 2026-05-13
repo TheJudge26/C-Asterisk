@@ -212,11 +212,15 @@ class SemanticAnalyzer:
             self.symbol_table.declare(node.name, value_type)
             return
 
+        # check for type mismatches
         if var_type != value_type:
-            self.errors.add(SemanticError(
-                f"Type mismatch: expected {var_type} but got {value_type}"
-            ))
-            return
+            if var_type == "float" and value_type == "int":
+                value_type = "float" 
+            else:
+                self.errors.add(SemanticError(
+                    f"Type mismatch: expected {var_type} but got {value_type}"
+                ))
+                return
 
         self.symbol_table.declare(node.name, var_type)
 
@@ -232,7 +236,12 @@ class SemanticAnalyzer:
         value_type = self.visit(node.value)
 
         if var_type != value_type:
-            self.errors.add(SemanticError(
+
+            if var_type == "float" and value_type == "int":
+                pass #let it happen
+            else: 
+
+             self.errors.add(SemanticError(
                 f"Type mismatch in assignment: {var_type} vs {value_type}"
             ))
 
@@ -249,6 +258,15 @@ class SemanticAnalyzer:
         if left != right:
             self.errors.add(SemanticError(f"Type mismatch: {left} vs {right}"))
             return None
+        
+        if left == "string":
+            if node.op == TokenType.PLUS:
+                return "string"
+            if node.op in (TokenType.EQUAL_EQUAL, TokenType.NOT_EQUAL):
+                return "bool"
+            self.errors.add(SemanticError(f"Cannot use operator '{node.op}' on strings"))
+            return None
+    
 
         if node.op in (TokenType.PLUS, TokenType.MINUS,
                        TokenType.MULTIPLY, TokenType.DIVIDE):
@@ -257,7 +275,8 @@ class SemanticAnalyzer:
                 return None
             return left
 
-        if node.op in (TokenType.GREATER, TokenType.LESS, TokenType.EQUAL_EQUAL):
+        if node.op in (TokenType.GREATER, TokenType.LESS, TokenType.EQUAL_EQUAL, 
+                       TokenType.NOT_EQUAL, TokenType.GREATER_EQUAL, TokenType.LESS_EQUAL):
             return "bool"
 
         self.errors.add(SemanticError("Unknown operator"))

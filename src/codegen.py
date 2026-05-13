@@ -1,5 +1,6 @@
 import llvmlite.ir as ir
 import llvmlite.binding as llvm
+import re
 
 from tokens import TokenType
 from parser import (
@@ -35,13 +36,30 @@ class LLVMCodeGenerator:
         # The C function takes a string (char*) and an integer (int), and returns a float pointer (double*)
         csv_ty = ir.FunctionType(self.f64.as_pointer(), [self.i8_ptr, self.i32])
         self.load_csv_func = ir.Function(self.module, csv_ty, name="load_csv_native")
-        
 
+        malloc_ty = ir.FunctionType(self.i8_ptr, [self.i32])
+        self.malloc = ir.Function(self.module, malloc_ty, name="malloc")
+        
         self.sqrt_func = ir.Function(self.module, exp_ty, name="sqrt")
         self.log_func = ir.Function(self.module, exp_ty, name="log")
         
         pow_ty = ir.FunctionType(self.f64, [self.f64, self.f64])
         self.pow_func = ir.Function(self.module, pow_ty, name="pow")
+
+# C Standard Library String
+        self.strlen = ir.Function(self.module, ir.FunctionType(self.i32, [self.i8_ptr]), name="strlen")
+        self.strcpy = ir.Function(self.module, ir.FunctionType(self.i8_ptr, [self.i8_ptr, self.i8_ptr]), name="strcpy")
+        self.strcat = ir.Function(self.module, ir.FunctionType(self.i8_ptr, [self.i8_ptr, self.i8_ptr]), name="strcat")
+        self.strcmp = ir.Function(self.module, ir.FunctionType(self.i32, [self.i8_ptr, self.i8_ptr]), name="strcmp")
+    
+    def _enable_fast_math(self, ir_str):
+        """Injects LLVM fast-math flags into the IR to massively speed up Neural Networks."""
+        ir_str = re.sub(r'\bfadd\b', 'fadd fast', ir_str)
+        ir_str = re.sub(r'\bfsub\b', 'fsub fast', ir_str)
+        ir_str = re.sub(r'\bfmul\b', 'fmul fast', ir_str)
+        ir_str = re.sub(r'\bfdiv\b', 'fdiv fast', ir_str)
+        ir_str = re.sub(r'\bfcmp o', 'fcmp fast o', ir_str) 
+        return ir_str
         
 
     # =====================================================
@@ -138,6 +156,31 @@ class LLVMCodeGenerator:
 
         is_float = isinstance(l.type, ir.DoubleType) or isinstance(r.type, ir.DoubleType)
 
+        if isinstance(l.type, ir.PointerType) and getattr(l.type, 'pointee', None) == ir.IntType(8):
+            
+            if node.op == TokenType.PLUS:
+              
+                len_l = self.builder.call(self.strlen, [l])
+                len_r = self.builder.call(self.strlen, [r])
+                
+                total_len = self.builder.add(self.builder.add(len_l, len_r), self.i32(1))
+                
+                new_str = self.builder.call(self.malloc, [total_len])
+                
+                self.builder.call(self.strcpy, [new_str, l])
+                self.builder.call(self.strcat, [new_str, r])
+                
+                return new_str
+                
+            elif node.op == TokenType.EQUAL_EQUAL:
+                
+                cmp_val = self.builder.call(self.strcmp, [l, r])
+                return self.builder.icmp_signed("==", cmp_val, self.i32(0))
+                
+            elif node.op == TokenType.NOT_EQUAL:
+                cmp_val = self.builder.call(self.strcmp, [l, r])
+                return self.builder.icmp_signed("!=", cmp_val, self.i32(0))
+
         if node.op == TokenType.PLUS:
             return self.builder.fadd(l, r) if is_float else self.builder.add(l, r)
 
@@ -150,21 +193,24 @@ class LLVMCodeGenerator:
         if node.op == TokenType.DIVIDE:
             return self.builder.fdiv(l, r) if is_float else self.builder.sdiv(l, r)
 
-        if node.op in (TokenType.GREATER, TokenType.LESS, TokenType.EQUAL_EQUAL):
+        if node.op in (TokenType.GREATER, TokenType.LESS, TokenType.EQUAL_EQUAL, 
+                       TokenType.NOT_EQUAL, TokenType.GREATER_EQUAL, TokenType.LESS_EQUAL):
+            
+            # map tokens to exact LLVM comparison 
+            op_map = {
+                TokenType.GREATER: ">",
+                TokenType.LESS: "<",
+                TokenType.EQUAL_EQUAL: "==",
+                TokenType.NOT_EQUAL: "!=",
+                TokenType.GREATER_EQUAL: ">=",
+                TokenType.LESS_EQUAL: "<="
+            }
+            op_str = op_map[node.op]
+
             if is_float:
-                op = {
-                    TokenType.GREATER: ">",
-                    TokenType.LESS: "<",
-                    TokenType.EQUAL_EQUAL: "=="
-                }[node.op]
-                cmp = self.builder.fcmp_ordered(op, l, r)
+                cmp = self.builder.fcmp_ordered(op_str, l, r)
             else:
-                op = {
-                    TokenType.GREATER: ">",
-                    TokenType.LESS: "<",
-                    TokenType.EQUAL_EQUAL: "=="
-                }[node.op]
-                cmp = self.builder.icmp_signed(op, l, r)
+                cmp = self.builder.icmp_signed(op_str, l, r)
 
             return self.builder.zext(cmp, self.i32)
 
@@ -324,10 +370,16 @@ class LLVMCodeGenerator:
                     
                     if isinstance(val.type, ir.ArrayType) and isinstance(field_ptr.type.pointee, ir.PointerType):
                         
-                        temp_arr = self.builder.alloca(val.type)
-                        self.builder.store(val, temp_arr)
-                        
-                        val = self.builder.bitcast(temp_arr, field_ptr.type.pointee)
+                        #se how many bytes we need 
+                        element_size = 8 if isinstance(val.type.element, ir.DoubleType) else 4
+                        total_bytes = val.type.count * element_size                   
+                        # malloc instead of alloca
+                        raw_mem = self.builder.call(self.malloc, [ir.Constant(self.i32, total_bytes)])                        
+                        # match array and ram
+                        array_ptr = self.builder.bitcast(raw_mem, val.type.as_pointer())
+                        # store memory
+                        self.builder.store(val, array_ptr) 
+                        val = self.builder.bitcast(array_ptr, field_ptr.type.pointee)
                     
                     
                     self.builder.store(val, field_ptr) 
@@ -395,12 +447,26 @@ class LLVMCodeGenerator:
     # ==========
     
     def visit_For(self, node):
-        limit_val = self.visit(node.iterable) 
-        start = ir.Constant(self.i32, 0)
-        i_ptr = self.builder.alloca(self.i32, name=node.var)
-        self.builder.store(start, i_ptr)
+        iterable_val = self.visit(node.iterable) 
+        is_array = False
+        limit_val = iterable_val
+        
+        if hasattr(iterable_val.type, "pointee") and isinstance(iterable_val.type.pointee, ir.ArrayType):
+            is_array = True
+            limit_val = ir.Constant(self.i32, iterable_val.type.pointee.count)
+        elif isinstance(iterable_val.type, ir.ArrayType):
+            is_array = True
+            limit_val = ir.Constant(self.i32, iterable_val.type.count)
 
-        self.variables[node.var] = i_ptr # register loop variable
+
+        start = ir.Constant(self.i32, 0)
+        
+        var_type = iterable_val.type.pointee.element if is_array else self.i32
+        loop_var_ptr = self.builder.alloca(var_type, name=node.var)
+        
+        idx_ptr = self.builder.alloca(self.i32, name=f"{node.var}_idx")
+        self.builder.store(start, idx_ptr)
+        self.variables[node.var] = loop_var_ptr 
 
         cond_bb = self.builder.append_basic_block("for.cond")
         body_bb = self.builder.append_basic_block("for.body")
@@ -408,16 +474,29 @@ class LLVMCodeGenerator:
 
         self.builder.branch(cond_bb)
         self.builder.position_at_end(cond_bb)
-        i = self.builder.load(i_ptr)
-        cond = self.builder.icmp_signed("<", i, limit_val)
+
+        curr_idx = self.builder.load(idx_ptr)
+        cond = self.builder.icmp_signed("<", curr_idx, limit_val)
         self.builder.cbranch(cond, body_bb, end_bb)
 
         self.builder.position_at_end(body_bb)
+        
+        if is_array:
+            zero = ir.Constant(self.i32, 0)
+            element_ptr = self.builder.gep(iterable_val, [zero, curr_idx], inbounds=True)
+            element_val = self.builder.load(element_ptr)
+            self.builder.store(element_val, loop_var_ptr)
+        else:
+            self.builder.store(curr_idx, loop_var_ptr)
+
         for s in node.body:
             self.visit(s)
 
-        i = self.builder.load(i_ptr)
-        self.builder.store(self.builder.add(i, self.i32(1)), i_ptr)
+       
+        curr_idx = self.builder.load(idx_ptr)
+        next_idx = self.builder.add(curr_idx, self.i32(1))
+        self.builder.store(next_idx, idx_ptr)
+        
         self.builder.branch(cond_bb)
         self.builder.position_at_end(end_bb)
 
@@ -547,6 +626,7 @@ class LLVMCodeGenerator:
     
     def execute(self):
         llvm_ir = str(self.module)
+        llvm_ir = self._enable_fast_math(llvm_ir)
         mod = llvm.parse_assembly(llvm_ir)
         mod.verify()
 
@@ -595,6 +675,7 @@ class LLVMCodeGenerator:
         
         llvm_ir = str(self.module)
         mod = llvm.parse_assembly(llvm_ir)
+        llvm_ir = self._enable_fast_math(llvm_ir)
         mod.verify()
 
         
@@ -636,6 +717,7 @@ class LLVMCodeGenerator:
         """Compiles the LLVM IR down to a native Object File (.obj / .o)."""
         
         llvm_ir = str(self.module)
+        llvm_ir = self._enable_fast_math(llvm_ir)
         mod = llvm.parse_assembly(llvm_ir)
         mod.verify()
         

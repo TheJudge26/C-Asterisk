@@ -181,6 +181,7 @@ class Parser:
         self.tokens = tokens
         self.pos = 0
         self.current = tokens[self.pos]
+        self.errors = []
 
     def advance(self):
         self.pos += 1
@@ -198,6 +199,18 @@ class Parser:
 
     def peek(self):
         return self.tokens[self.pos + 1] if self.pos + 1 < len(self.tokens) else None
+    
+    def synchronize(self):
+        """Panic mode recovery: skip tokens until we hit a safe statement boundary."""
+        self.advance()
+        while self.current.type != TokenType.EOF:
+            # Safe synchronization points to resume parsing
+            if self.current.type in (
+                TokenType.LET, TokenType.FUNC, TokenType.CLASS, 
+                TokenType.IF, TokenType.WHILE, TokenType.FOR, TokenType.RETURN
+            ):
+                return
+            self.advance()
 
     # =========================
     # ENTRY
@@ -205,7 +218,14 @@ class Parser:
     def parse(self):
         statements = []
         while self.current.type != TokenType.EOF:
-            statements.append(self.statement())
+         try:
+                stmt = self.statement()
+                if stmt:
+                    statements.append(stmt)
+         except ParserError as e:
+                
+                self.errors.append(str(e))
+                self.synchronize()
         return Program(statements)
 
     # =========================

@@ -1,6 +1,2 @@
-let my_array: [float] = [1.1, 2.2, 3.3]
-
-# Overwrite index 1!
-my_array[1] = 99.9
-
-print(my_array[1])
+let greeting = "Hello " + "World!"
+print(greeting)
