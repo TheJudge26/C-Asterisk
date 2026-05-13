@@ -6,8 +6,6 @@ func main() {
     var iterations = 2 // Even 2 iterations is incredibly accurate
 
     while (k < iterations) {
-        // Simplified Ramanujan-style step
-        // Note: You'll need to use your 'pow' and 'sqrt' calls here
         var num = 1103.0 + (26390.0 * k)
         var den = pow(396.0, (4.0 * k))
         
