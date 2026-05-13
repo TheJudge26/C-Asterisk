@@ -1,0 +1,9 @@
+let a = 10
+let b = 20
+
+if a < b {
+    print("Less than works")
+}
+if a != b {
+    print("Not equal works")
+}

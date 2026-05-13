@@ -1,6 +1,6 @@
 
 class NativeAI {
-    # INSTANT LOAD USING YOUR C-LIBRARY!
+    
     let train_img: [float] = load_csv("examples/mnist_project/train_X.csv", 40000)
     let train_lbl: [float] = load_csv("examples/mnist_project/train_y.csv", 100)
     

@@ -1,0 +1,8 @@
+
+bias: float = 2.5
+weight: float = 10.0
+
+final_score: float = bias * weight
+
+print("The new syntax works")
+print(final_score)

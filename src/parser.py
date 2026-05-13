@@ -204,7 +204,7 @@ class Parser:
         """Panic mode recovery: skip tokens until we hit a safe statement boundary."""
         self.advance()
         while self.current.type != TokenType.EOF:
-            # Safe synchronization points to resume parsing
+            
             if self.current.type in (
                 TokenType.LET, TokenType.FUNC, TokenType.CLASS, 
                 TokenType.IF, TokenType.WHILE, TokenType.FOR, TokenType.RETURN
@@ -251,19 +251,19 @@ class Parser:
         elif self.current.type == TokenType.IMPORT:
             return self.import_stmt()
         elif self.current.type == TokenType.IDENTIFIER:
-            # 1. Parse the left side (could be 'x', 'arr[i]', or 'obj.field')
+    
+            next_token = self.peek()
+            if next_token and next_token.type == TokenType.COLON:
+                return self.var_decl()
             target = self.expression()
-            
-            # 2. Check if an '=' comes next (Memory Overwrite!)
+           
             if self.current.type == TokenType.EQUAL:
                 self.eat(TokenType.EQUAL)
                 value = self.expression()
                 
-                # If it's a simple variable (x = 5)
                 if type(target).__name__ == "Variable":
                     return Assignment(target.name, value)
                 
-                # If it's an array or object field (arr[i] = 5)
                 return Assignment("memory_overwrite", value, target=target)
 
             if isinstance(target, Variable):
@@ -372,7 +372,7 @@ class Parser:
         return statements
 
     # =========================
-    # FOR LOOP FIXED
+    # FOR LOOP 
     # =========================
     def for_stmt(self):
         self.eat(TokenType.FOR)
@@ -389,13 +389,12 @@ class Parser:
 
         return For(var, iterable, body)
 
-    # =========================
-    # EXPRESSIONS (FIXED CHAINING)
-    # =========================
+    # ======================
+    # EXPRESSIONS 
+    # ==================
     def primary(self):
         token = self.current
 
-# UNARY MINUS
         if token.type == TokenType.MINUS:
             self.eat(TokenType.MINUS)
             if self.current.type == TokenType.FLOAT:
@@ -409,7 +408,6 @@ class Parser:
             else:
                 raise ParserError("Expected a number after '-'", token.line, token.column)
             
-        # literals
         if token.type == TokenType.NUMBER:
             self.eat(TokenType.NUMBER)
             return Number(token.value)
@@ -430,14 +428,12 @@ class Parser:
             self.eat(TokenType.FALSE)
             return BoolNode(False)
 
-        # IDENTIFIER CHAINING FIX
         if token.type == TokenType.IDENTIFIER:
             node = Variable(token.value)
             self.eat(TokenType.IDENTIFIER)
 
             while True:
 
-                # CALL
                 if self.current.type == TokenType.LPAREN:
                     self.eat(TokenType.LPAREN)
 
@@ -457,14 +453,12 @@ class Parser:
                     else:
                         node = Call(node.name, args)
 
-                # INDEX
                 elif self.current.type == TokenType.LBRACKET:
                     self.eat(TokenType.LBRACKET)
                     index = self.expression()
                     self.eat(TokenType.RBRACKET)
                     node = ArrayIndex(node, index)
 
-                # MEMBER ACCESS
                 elif self.current.type == TokenType.DOT:
                     self.eat(TokenType.DOT)
                     member = self.current.value
@@ -483,7 +477,6 @@ class Parser:
             self.eat(TokenType.RPAREN)
             return node
 
-        # array
         if token.type == TokenType.LBRACKET:
             self.eat(TokenType.LBRACKET)
             elements = []
@@ -538,12 +531,13 @@ class Parser:
 
     
     def var_decl(self):
-        """Parses a variable declaration: let name: type = value"""
-        self.eat(TokenType.LET)
+        """Parses a variable declaration: [let] name: type = value"""
+        if self.current.type == TokenType.LET:
+            self.eat(TokenType.LET)
+
         name = self.current.value
         self.eat(TokenType.IDENTIFIER)
 
-        # Use our new recursive type parser!
         type_annotation = None
         if self.current.type == TokenType.COLON:
             self.eat(TokenType.COLON)

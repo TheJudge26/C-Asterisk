@@ -1,5 +1,0 @@
-func add(a: int, b: int) -> int {
-  return a + b
-}
-let res: int = add(1, 2)
-print(res)
