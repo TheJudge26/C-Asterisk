@@ -1,2 +1,2 @@
-arr array = ["a","as"]
-print(array)
+let nummy: int =1
+print(nummy)
