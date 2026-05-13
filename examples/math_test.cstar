@@ -7,7 +7,7 @@ func main() {
 
     while (k < iterations) {
         // Simplified Ramanujan-style step
-        // (4k)! * (1103 + 26390k) / (k!^4 * 396^4k)
+        // (4k) * (1103 + 26390k) / (k!^4 * 396^4k)
         // Note: You'll need to use your 'pow' and 'sqrt' calls here
         var num = 1103.0 + (26390.0 * k)
         var den = pow(396.0, (4.0 * k))
