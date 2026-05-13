@@ -1,2 +1,2 @@
-array = ["a","as"]
+arr array = ["a","as"]
 print(array)
