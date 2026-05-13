@@ -1,2 +1,3 @@
 let nummy: int =1
-print(nummy)
+print(nummy*nummy)
+nummy+=1
