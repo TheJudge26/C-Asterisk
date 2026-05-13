@@ -1,3 +1,3 @@
 import subprocess
 import sys
-subprocess.run(["python","src/main.py",sys.argv[2]])
+subprocess.run(["python","src/main.py",sys.argv[1]])
