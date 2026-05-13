@@ -53,4 +53,4 @@ if ($oldPath -split ';' -notcontains $destination) {
 } else {
     Write-Host "Folder is already in PATH."
 }
-exit 
+exit   
