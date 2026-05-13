@@ -337,11 +337,11 @@ class SemanticAnalyzer:
     # FUNCTION
     # -----------------------------
     def visit_function(self, node):
-        self.symbol_table.declare(node.name, {
+        self.symbol_table.scopes[-1][node.name] = {
             "type": "function",
             "return": node.return_type,
             "params": node.params
-        })
+        }
 
         self.symbol_table.enter_scope()
         self.in_function = True
