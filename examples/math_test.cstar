@@ -1,26 +1,24 @@
-// C* Pi Calculation using Leibniz Formula
 import math
 
 func main() {
-    var pi = 0.0
-    var denominator = 1.0
-    var operation = 1.0 // 1.0 for addition, -1.0 for subtraction
-    var iterations = 1000000
-    var i = 0
+    var k = 0.0
+    var sum = 0.0
+    var iterations = 2 // Even 2 iterations is incredibly accurate
 
-    while (i < iterations) {
-        // Leibniz step: pi += operation * (4.0 / denominator)
-        pi = pi + (operation * (4.0 / denominator))
+    while (k < iterations) {
+        // Simplified Ramanujan-style step
+        // (4k)! * (1103 + 26390k) / (k!^4 * 396^4k)
+        // Note: You'll need to use your 'pow' and 'sqrt' calls here
+        var num = 1103.0 + (26390.0 * k)
+        var den = pow(396.0, (4.0 * k))
         
-        // Update denominator to the next odd number
-        denominator = denominator + 2.0
-        
-        // Flip the sign for the next term
-        operation = operation * -1.0
-        
-        i = i + 1
+        sum = sum + (num / den)
+        k = k + 1.0
     }
 
+    var result = (2.0 * sqrt(2.0)) / 9801.0 * sum
+    var pi = 1.0 / result
+    
     print(pi)
     return 0
 }
