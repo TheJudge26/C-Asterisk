@@ -389,6 +389,9 @@ class SemanticAnalyzer:
                 func = scope[node.name]
                 break
 
+        if isinstance(func, dict) and isinstance(func.get("type"), dict):
+            func = func["type"]
+
         if isinstance(func, dict) and func.get("type") == "function":
             params = func["params"]
             if len(params) != len(node.args):
