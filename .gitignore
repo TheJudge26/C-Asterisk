@@ -1,0 +1,6 @@
+.vscode
+test*
+.venv
+someprog*
+myprog*
+__pycache__
