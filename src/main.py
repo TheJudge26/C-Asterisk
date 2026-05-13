@@ -40,7 +40,7 @@ def main():
     parser = Parser(tokens)
     ast = parser.parse()
 
-    # --- PANIC MODE ERROR CHECK ---
+    # ERROR CHECK 
     if parser.errors:
         print("\n--- PARSER ERRORS ---")
         for err in parser.errors:
@@ -95,16 +95,13 @@ def main():
         codegen.execute()
         
 
-        # 1. Safely create the 'obj' folder if it doesn't exist yet
+        # create the 'obj' folder 
         os.makedirs("obj", exist_ok=True) 
         
-        # 2. Extract the file name (e.g., 'speed_test' from 'examples/speed_test.cstar')
         base_name = os.path.splitext(os.path.basename(file_path))[0]
         
-        # 3. Route the output path into the folder
         obj_path = os.path.join("obj", f"{base_name}.obj")
         
-        # 4. Save the file!
         codegen.save_object(obj_path)
 
     
@@ -115,6 +112,6 @@ def main():
 
     print("Success! (Pipeline is completely wired up)")
 
-
 if __name__ == "__main__":
     main()
+

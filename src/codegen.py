@@ -154,6 +154,11 @@ class LLVMCodeGenerator:
         l = self.visit(node.left)
         r = self.visit(node.right)
 
+        if isinstance(l.type, ir.IntType) and isinstance(r.type, ir.DoubleType):
+            l = self.builder.sitofp(l, ir.DoubleType())
+        elif isinstance(l.type, ir.DoubleType) and isinstance(r.type, ir.IntType):
+            r = self.builder.sitofp(r, ir.DoubleType())
+
         is_float = isinstance(l.type, ir.DoubleType) or isinstance(r.type, ir.DoubleType)
 
         if isinstance(l.type, ir.PointerType) and getattr(l.type, 'pointee', None) == ir.IntType(8):
@@ -205,14 +210,12 @@ class LLVMCodeGenerator:
                 TokenType.GREATER_EQUAL: ">=",
                 TokenType.LESS_EQUAL: "<="
             }
-            op_str = op_map[node.op]
+            llvm_op = op_map[node.op]
 
-            if is_float:
-                cmp = self.builder.fcmp_ordered(op_str, l, r)
+            if isinstance(l.type, ir.DoubleType) and isinstance(r.type, ir.DoubleType):
+                return self.builder.fcmp_ordered(llvm_op, l, r)
             else:
-                cmp = self.builder.icmp_signed(op_str, l, r)
-
-            return self.builder.zext(cmp, self.i32)
+                return self.builder.icmp_signed(llvm_op, l, r)
 
     # =====
     # PRINT

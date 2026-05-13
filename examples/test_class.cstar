@@ -1,4 +1,0 @@
-let inputs: [float] = [1.5, -2.0, 3.8, 4.2]
-let size: int = len(inputs)
-
-print(size)

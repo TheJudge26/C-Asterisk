@@ -1,4 +1,0 @@
-let limit: int = 5
-for i in limit {
-    print(i)
-}

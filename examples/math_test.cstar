@@ -1,8 +1,7 @@
-let error: float = -4.0
-let squared_error: float = pow(error, 2.0)
-let distance: float = sqrt(144.0)
-let natural_log: float = log(2.71828)
+let x: float = 100  
+let y: float = 2.5
+let result = x / y
 
-print(squared_error)
-print(distance)
-print(natural_log)
+if result >= 40.0 {
+    print("Math and Promotion work")
+}

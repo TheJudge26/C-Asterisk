@@ -1,5 +1,6 @@
-let name: string = "hello"
+let a = "Compiler "
+let b = "Overhaul "
+let c = "Complete"
 
-print(name)
-print(5)
-print(3.14)
+let final = a + b + c
+print(final)
