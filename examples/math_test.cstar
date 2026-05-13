@@ -1,21 +1,16 @@
-import math
-
 func main() {
-    var k = 0.0
-    var sum = 0.0
-    var iterations = 2 // Even 2 iterations is incredibly accurate
+    var pi = 0.0
+    var denom = 1.0
+    var sign = 1.0
+    var i = 0
 
-    while (k < iterations) {
-        var num = 1103.0 + (26390.0 * k)
-        var den = pow(396.0, (4.0 * k))
-        
-        sum = sum + (num / den)
-        k = k + 1.0
+    while (i < 5) {
+        pi = pi + (sign * (4.0 / denom))
+        denom = denom + 2.0
+        sign = sign * -1.0
+        i = i + 1
     }
 
-    var result = (2.0 * sqrt(2.0)) / 9801.0 * sum
-    var pi = 1.0 / result
-    
-    print(pi)
+    print(pi) // Should output approx 3.339 for 5 iterations
     return 0
 }
