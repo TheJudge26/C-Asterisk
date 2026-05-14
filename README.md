@@ -214,7 +214,7 @@ let p: float = pow(2.0, 10.0)   # 1024.0
 
 ### Native CSV Loading (C FFI)
 
-C* can call into native C shared libraries directly. The built-in `load_csv` function uses a compiled C extension (`lib_io.dll`) to stream large datasets into memory at full C speed — no Python I/O overhead.
+C* can call into native C shared libraries directly. The built-in `load_csv` function uses a compiled C extension (`lib_io.dll` on Windows, `lib_io.so` on Linux, `lib_io.dylib` on macOS) to stream large datasets into memory at full C speed — no Python I/O overhead.
 
 ```cstar
 let data: [float] = load_csv("dataset/train_X.csv", 40000)
@@ -235,12 +235,10 @@ let x: int = 5  # inline comment
 ### Prerequisites
 
 - Python 3.9+
-- `llvmlite` (install via pip)
-- A compiled `lib_io.dll` (or `.so` on Linux/macOS) in the `src/` directory for CSV support
-
-```bash
-pip install llvmlite
-```
+- `llvmlite` — `pip install llvmlite`
+- Optional: if you use `load_csv`, place a built native library in `src/`:
+  - **Linux / macOS:** `make -f Makefile.lib_io lib_io`
+  - **Windows:** compile `src/lib_io.c` to `lib_io.dll` (MSVC or MinGW, `-shared`).
 
 ### Running a `.cstar` File
 
@@ -260,7 +258,7 @@ python examples/mnist_project/convert_data.py
 python src/main.py examples/mnist_project/benchmark_fast.cstar
 ```
 
-The compiler will print each phase as it runs, display the full AST, emit LLVM IR to stdout, JIT-execute the program, and save a native `.obj` file to the `obj/` directory.
+The compiler will print each phase as it runs, display the full AST, emit LLVM IR to stdout, JIT-execute the program, and save a native object file to the `obj/` directory (`.obj` on Windows, `.o` on Linux and macOS).
 
 ```
 --- Compiling examples/hello.cstar ---
@@ -340,7 +338,7 @@ cstar/
 │   ├── errors.py         ← Compiler error hierarchy
 │   ├── error_list.py     ← Error accumulator
 │   ├── lib_io.c          ← Native C extension for fast CSV loading
-│   └── lib_io.dll        ← Compiled shared library (Windows)
+│   └── lib_io.{dll,so,dylib}  ← Built locally (see Makefile.lib_io)
 │
 ├── examples/
 │   └── mnist_project/
@@ -349,7 +347,8 @@ cstar/
 │       ├── convert_data.py        ← Prepares flat CSV data files
 │       └── *.csv                  ← MNIST training/test data
 │
-├── obj/                  ← Compiled .obj files (generated at runtime)
+├── obj/                  ← Compiled object files (generated at runtime)
+├── Makefile.lib_io       ← Builds lib_io.so / lib_io.dylib (Unix)
 ├── COMPILER_ARCHITECTURE.md
 └── README.md
 ```
@@ -368,7 +367,7 @@ It grew into something we're genuinely proud of, so we're releasing it under the
 3. Make your changes and add tests
 4. Open a pull request with a description of what you built
 
-Areas where contributions are especially welcome: a `string` type in codegen, `>=` / `<=` in codegen, a standard library, improved error messages with source highlighting, and Linux/macOS shared library support for `lib_io`.
+Areas where contributions are especially welcome: a `string` type in codegen, `>=` / `<=` in codegen, a standard library, improved error messages with source highlighting, and further native/FFI polish (e.g. packaging `lib_io` for more targets).
 
 ---
 
