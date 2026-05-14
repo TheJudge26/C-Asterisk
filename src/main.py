@@ -1,11 +1,45 @@
 import sys
 import os
+import platform
 from lexer import Lexer
 from parser import Parser
 from semantic import SemanticAnalyzer
 from codegen import LLVMCodeGenerator
 from visualizer import ASTPrinter 
 from errors import CompilerError, LexerError, ParserError, SemanticError
+
+
+def _native_object_extension():
+    return ".obj" if platform.system() == "Windows" else ".o"
+
+
+def _lib_io_shared_library_path():
+    """Path to the native CSV helper next to this file; name depends on OS."""
+    base = os.path.dirname(os.path.abspath(__file__))
+    system = platform.system()
+    if system == "Windows":
+        name = "lib_io.dll"
+    elif system == "Darwin":
+        name = "lib_io.dylib"
+    else:
+        name = "lib_io.so"
+    return os.path.join(base, name)
+
+
+def _try_load_lib_io():
+    """Load lib_io for load_csv; warn if missing (programs without load_csv still run)."""
+    import llvmlite.binding as llvm
+
+    path = _lib_io_shared_library_path()
+    if not os.path.isfile(path):
+        print(
+            "\n[Notice] Native lib_io not found (expected at "
+            f"{path}). Programs using load_csv need it; build with "
+            "`make -f Makefile.lib_io lib_io` from the project root.\n"
+        )
+        return
+    llvm.load_library_permanently(path)
+
 
 def main():
     if len(sys.argv) < 2:
@@ -86,12 +120,8 @@ def main():
     #test too
     # 5. Execution and Compilation
     try:
-        
-        import llvmlite.binding as llvm
-        
-        dll_path = os.path.join(os.path.dirname(__file__), "lib_io.dll")
-        llvm.load_library_permanently(dll_path)
-        
+        _try_load_lib_io()
+
         codegen.execute()
         
 
@@ -100,7 +130,7 @@ def main():
         
         base_name = os.path.splitext(os.path.basename(file_path))[0]
         
-        obj_path = os.path.join("obj", f"{base_name}.obj")
+        obj_path = os.path.join("obj", f"{base_name}{_native_object_extension()}")
         
         codegen.save_object(obj_path)
 
