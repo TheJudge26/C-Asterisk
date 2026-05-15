@@ -16,6 +16,9 @@ KEYWORDS = {
     "in": TokenType.IN,
     "class": TokenType.CLASS,
     "import": TokenType.IMPORT,
+    "and": TokenType.AND,
+    "or": TokenType.OR,
+    "not": TokenType.NOT,
 }
 
 SINGLE_CHAR_TOKENS = {

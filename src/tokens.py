@@ -43,6 +43,9 @@ class TokenType(Enum):
     IMPORT = "IMPORT"
     FROM = "FROM"
     AS = "AS"
+    AND = "AND"
+    OR = "OR"
+    NOT = "NOT"
 
 class Token:
     def __init__(self, type, value=None, line=None, column=None):

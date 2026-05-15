@@ -1,6 +1,6 @@
 from parser import (
-    Program, VarDecl, Assignment, BinaryOp, Number, 
-    Variable, Print, If, While, Function, Return, 
+    Program, VarDecl, Assignment, BinaryOp, UnaryOp, IntNode,
+    Variable, Print, If, While, Function, Return,
     ArrayLiteral, ArrayIndex, FloatNode, Call
 )
 
@@ -39,6 +39,9 @@ class ASTPrinter:
         elif isinstance(node, BinaryOp):
             self.print_node(node.left, label="Left", is_last=False)
             self.print_node(node.right, label="Right", is_last=True)
+
+        elif isinstance(node, UnaryOp):
+            self.print_node(node.operand, label="Operand", is_last=True)
 
         elif isinstance(node, VarDecl) or isinstance(node, Assignment):
             self.print_node(node.value, label="Value", is_last=True)

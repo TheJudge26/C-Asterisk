@@ -12,7 +12,7 @@ class AST:
 # =========================
 # LITERALS
 # =========================
-class Number(AST):
+class IntNode(AST):
     def __init__(self, value):
         self.value = value
 
@@ -52,6 +52,12 @@ class BinaryOp(AST):
         self.left = left
         self.op = op
         self.right = right
+
+
+class UnaryOp(AST):
+    def __init__(self, op, operand):
+        self.op = op
+        self.operand = operand
 
 
 # =========================
@@ -158,19 +164,22 @@ class Import(AST):
         self.module = module
 
 PRECEDENCE = {
-    TokenType.EQUAL_EQUAL: 1,
-    TokenType.NOT_EQUAL: 1,
+    TokenType.OR: 0,
+    TokenType.AND: 1,
 
-    TokenType.GREATER: 2,
-    TokenType.LESS: 2,
-    TokenType.GREATER_EQUAL: 2,
-    TokenType.LESS_EQUAL: 2,
+    TokenType.EQUAL_EQUAL: 2,
+    TokenType.NOT_EQUAL: 2,
 
-    TokenType.PLUS: 3,
-    TokenType.MINUS: 3,
+    TokenType.GREATER: 3,
+    TokenType.LESS: 3,
+    TokenType.GREATER_EQUAL: 3,
+    TokenType.LESS_EQUAL: 3,
 
-    TokenType.MULTIPLY: 4,
-    TokenType.DIVIDE: 4,
+    TokenType.PLUS: 4,
+    TokenType.MINUS: 4,
+
+    TokenType.MULTIPLY: 5,
+    TokenType.DIVIDE: 5,
 }
 
 # =========================
@@ -218,12 +227,11 @@ class Parser:
     def parse(self):
         statements = []
         while self.current.type != TokenType.EOF:
-         try:
+            try:
                 stmt = self.statement()
                 if stmt:
                     statements.append(stmt)
-         except ParserError as e:
-                
+            except ParserError as e:
                 self.errors.append(str(e))
                 self.synchronize()
         return Program(statements)
@@ -261,16 +269,21 @@ class Parser:
                 self.eat(TokenType.EQUAL)
                 value = self.expression()
                 
-                if type(target).__name__ == "Variable":
+                if isinstance(target, Variable):
                     return Assignment(target.name, value)
-                
+
                 return Assignment("memory_overwrite", value, target=target)
 
             if isinstance(target, Variable):
                 return target
             return ExpressionStatement(target)
-            
 
+        else:
+            raise ParserError(
+                f"Unexpected token '{self.current.value}'",
+                self.current.line,
+                self.current.column,
+            )
 
     def print_stmt(self):
         self.eat(TokenType.PRINT)
@@ -319,10 +332,8 @@ class Parser:
                 params.append(self.parameter())
 
         self.eat(TokenType.RPAREN)
-        self.eat(TokenType.ARROW)
-
-        return_type = str(self.current.value)
-        self.eat(TokenType.IDENTIFIER)
+        self.eat(TokenType.COLON)
+        return_type = self.parse_type()
 
         body = self.block()
         return Function(name, params, return_type, body)
@@ -378,10 +389,6 @@ class Parser:
         self.eat(TokenType.FOR)
         var = self.current.value
         self.eat(TokenType.IDENTIFIER)
-
-        if self.current.type != TokenType.IN:
-            raise ParserError("Expected 'in'", self.current.line, self.current.column)
-
         self.eat(TokenType.IN)
 
         iterable = self.expression()
@@ -395,22 +402,19 @@ class Parser:
     def primary(self):
         token = self.current
 
+        if token.type == TokenType.NOT:
+            self.eat(TokenType.NOT)
+            operand = self.primary()
+            return UnaryOp(TokenType.NOT, operand)
+
         if token.type == TokenType.MINUS:
             self.eat(TokenType.MINUS)
-            if self.current.type == TokenType.FLOAT:
-                val = self.current.value
-                self.eat(TokenType.FLOAT)
-                return FloatNode(-val)
-            elif self.current.type == TokenType.NUMBER:
-                val = self.current.value
-                self.eat(TokenType.NUMBER)
-                return Number(-val)
-            else:
-                raise ParserError("Expected a number after '-'", token.line, token.column)
-            
+            operand = self.primary()
+            return UnaryOp(TokenType.MINUS, operand)
+
         if token.type == TokenType.NUMBER:
             self.eat(TokenType.NUMBER)
-            return Number(token.value)
+            return IntNode(token.value)
 
         if token.type == TokenType.FLOAT:
             self.eat(TokenType.FLOAT)
@@ -508,15 +512,7 @@ class Parser:
             left = BinaryOp(left, op.type, right)
 
         return left
-    
-    def assignment(self):
-        name = self.current.value
-        self.eat(TokenType.IDENTIFIER)
-        self.eat(TokenType.EQUAL)
-        value = self.expression()
-        return Assignment(name, value)
-    
-   
+
     def parse_type(self):
         """Recursively parses types like int, float, [int], [[float]]."""
         if self.current.type == TokenType.LBRACKET:

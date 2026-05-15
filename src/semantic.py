@@ -1,6 +1,6 @@
 from tokens import TokenType
 from parser import (
-    Program, VarDecl, Assignment, BinaryOp, Number, Variable, Print,
+    Program, VarDecl, Assignment, BinaryOp, UnaryOp, IntNode, Variable, Print,
     If, While, Function, Return, ArrayLiteral, ArrayIndex,
     FloatNode, Call, StringNode, BoolNode, For,
     ClassDecl, MemberAccess, Import, ExpressionStatement,
@@ -119,8 +119,11 @@ class SemanticAnalyzer:
         elif isinstance(node, BinaryOp):
             return self.visit_binary_op(node)
 
-        elif isinstance(node, Number):
+        elif isinstance(node, IntNode):
             return "int"
+
+        elif isinstance(node, UnaryOp):
+            return self.visit_unary_op(node)
 
         elif isinstance(node, FloatNode):
             return "float"
@@ -275,11 +278,37 @@ class SemanticAnalyzer:
                 return None
             return left
 
-        if node.op in (TokenType.GREATER, TokenType.LESS, TokenType.EQUAL_EQUAL, 
+        if node.op in (TokenType.GREATER, TokenType.LESS, TokenType.EQUAL_EQUAL,
                        TokenType.NOT_EQUAL, TokenType.GREATER_EQUAL, TokenType.LESS_EQUAL):
             return "bool"
 
+        if node.op in (TokenType.AND, TokenType.OR):
+            if left != "bool" or right != "bool":
+                self.errors.add(SemanticError("Logical operators require bool operands"))
+                return None
+            return "bool"
+
         self.errors.add(SemanticError("Unknown operator"))
+        return None
+
+    def visit_unary_op(self, node):
+        operand_type = self.visit(node.operand)
+        if operand_type is None:
+            return None
+
+        if node.op == TokenType.NOT:
+            if operand_type != "bool":
+                self.errors.add(SemanticError("Unary 'not' requires bool operand"))
+                return None
+            return "bool"
+
+        if node.op == TokenType.MINUS:
+            if operand_type not in ("int", "float"):
+                self.errors.add(SemanticError("Unary '-' requires numeric operand"))
+                return None
+            return operand_type
+
+        self.errors.add(SemanticError("Unknown unary operator"))
         return None
 
     # -----------------------------

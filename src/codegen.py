@@ -4,7 +4,7 @@ import re
 
 from tokens import TokenType
 from parser import (
-    Program, Function, Print, Number, BinaryOp,
+    Program, Function, Print, IntNode, BinaryOp, UnaryOp,
     VarDecl, Variable, Assignment, If, While,
     Return, ArrayLiteral, ArrayIndex, FloatNode,
     Call, StringNode, BoolNode, For
@@ -96,8 +96,22 @@ class LLVMCodeGenerator:
     # =====================================================
     # LITERALS
     # =====================================================
-    def visit_Number(self, node):
+    def visit_IntNode(self, node):
         return ir.Constant(self.i32, int(node.value))
+
+    def visit_UnaryOp(self, node):
+        operand = self.visit(node.operand)
+
+        if node.op == TokenType.NOT:
+            not_i1 = self.builder.icmp_signed("==", operand, self.i32(0))
+            return self.builder.zext(not_i1, self.i32)
+
+        if node.op == TokenType.MINUS:
+            if isinstance(operand.type, ir.DoubleType):
+                return self.builder.fneg(operand)
+            return self.builder.sub(self.i32(0), operand)
+
+        raise Exception(f"Unknown unary operator {node.op}")
 
     def visit_FloatNode(self, node):
         return ir.Constant(self.f64, float(node.value))
@@ -216,6 +230,16 @@ class LLVMCodeGenerator:
                 return self.builder.fcmp_ordered(llvm_op, l, r)
             else:
                 return self.builder.icmp_signed(llvm_op, l, r)
+
+        if node.op == TokenType.AND:
+            l_bool = self.builder.icmp_signed("!=", l, self.i32(0))
+            r_bool = self.builder.icmp_signed("!=", r, self.i32(0))
+            return self.builder.zext(self.builder.and_(l_bool, r_bool), self.i32)
+
+        if node.op == TokenType.OR:
+            l_bool = self.builder.icmp_signed("!=", l, self.i32(0))
+            r_bool = self.builder.icmp_signed("!=", r, self.i32(0))
+            return self.builder.zext(self.builder.or_(l_bool, r_bool), self.i32)
 
     # =====
     # PRINT

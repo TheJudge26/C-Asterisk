@@ -37,7 +37,7 @@ class NativeAI {{
     let bias: float = 0.0
     let lr: float = 0.1
 
-    func train() -> float {{
+    func train(): float {{
         for epoch in 20 {{
             for i in 100 {{
                 let sum: float = self.bias
@@ -59,7 +59,7 @@ class NativeAI {{
         return 1.0
     }}
 
-    func predict() -> int {{
+    func predict(): int {{
         let correct: int = 0
         for i in 10 {{
             let sum: float = self.bias
