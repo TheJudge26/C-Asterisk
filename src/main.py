@@ -1,10 +1,7 @@
 import sys
 import os
-<<<<<<< HEAD
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
-=======
 import platform
->>>>>>> 65b5facc201694ef47e3e90090f1975c5586eb50
 from lexer import Lexer
 from parser import Parser
 from semantic import SemanticAnalyzer
