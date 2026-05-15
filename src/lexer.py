@@ -1,7 +1,6 @@
 from tokens import Token, TokenType
 from errors import LexerError
 
-# Reserved keywords
 KEYWORDS = {
     "let": TokenType.LET,
     "print": TokenType.PRINT,
@@ -89,8 +88,6 @@ class Lexer:
         if value == ".":
             raise LexerError("Invalid standalone '.'", start_line, start_column)
 
-        if value.startswith(".") or value.endswith("."):
-            raise LexerError("Invalid number format", start_line, start_column)
 
         if value.count(".") > 1:
             raise LexerError("Invalid number format", start_line, start_column)
@@ -100,7 +97,7 @@ class Lexer:
 
         return Token(TokenType.NUMBER, int(value), start_line, start_column)
 
-    # Cleaner and more optimized compilation
+    
     def identifier(self):
         result = []
 
@@ -119,29 +116,38 @@ class Lexer:
             return Token(KEYWORDS[value], value, start_line, start_column)
 
         return Token(TokenType.IDENTIFIER, value, start_line, start_column)
+        
 
     
     def string(self):
         result = []
         append = result.append
-
-        self.advance()  # skip opening "
-
         start_line = self.line
         start_column = self.column
 
+        self.advance()  
+
         while self.current_char is not None and self.current_char != '"':
-            append(self.current_char)
+            if self.current_char == "\\":  
+                self.advance()
+                if self.current_char == '"':
+                    append('"')
+                elif self.current_char == 'n':
+                    append('\n')
+                elif self.current_char == '\\':
+                    append('\\')
+                else:
+                    append(self.current_char)
+            else:
+                append(self.current_char)
+            
             self.advance()
 
         if self.current_char != '"':
-            raise LexerError("Unterminated string literal", self.line, self.column)
+            raise LexerError("Unterminated string", self.line, self.column)
 
         self.advance()  
-
-        value = "".join(result)
-
-        return Token(TokenType.STRING, value, start_line, start_column)
+        return Token(TokenType.STRING, "".join(result), start_line, start_column)
 
     def get_next_token(self):
 
@@ -152,49 +158,39 @@ class Lexer:
                 self.skip_whitespace()
                 continue
 
-            # COMMENTS
             if self.current_char == "#":
                 while self.current_char is not None and self.current_char != "\n":
                     self.advance()
                 continue
 
-            # NUMBERS
             if self.current_char.isdigit():
                 return self.number()
 
-            # STRINGS
             if self.current_char == '"':
                 return self.string()
-
-            # IDENTIFIERS / KEYWORDS
+            
             if self.current_char.isalpha() or self.current_char == "_":
                 return self.identifier()
-
-            # MULTI-CHAR OPERATORS (highest priority)
+            
             if self.current_char in ("=", "!", ">", "<", "-"):
                 return self._handle_operators()
 
-            # DOT (separate because of ambiguity with numbers)
             if self.current_char == ".":
                 start_line = self.line
                 start_column = self.column
 
                 next_char = self.text[self.position + 1] if self.position + 1 < len(self.text) else None
 
-                # CASE 1: ".2" → treat as float
                 if next_char is not None and next_char.isdigit():
                     return self.number()
 
-                # CASE 2: "1." → invalid number format (important for LLVM stability)
-                prev_char = self.text[self.position - 1] if self.position > 0 else None
-                if prev_char is not None and prev_char.isdigit():
-                    raise LexerError("Invalid number format", start_line, start_column)
+                # prev_char = self.text[self.position - 1] if self.position > 0 else None
+                # if prev_char is not None and prev_char.isdigit():
+                #     raise LexerError("Invalid number format", start_line, start_column)
 
-                # CASE 3: standalone dot
                 self.advance()
                 return Token(TokenType.DOT, ".", start_line, start_column)
 
-            # SINGLE CHAR TOKENS (FAST PATH)
             if self.current_char in SINGLE_CHAR_TOKENS:
                 tok_type = SINGLE_CHAR_TOKENS[self.current_char]
                 start_line = self.line
@@ -203,7 +199,6 @@ class Lexer:
                 self.advance()
                 return Token(tok_type, value, start_line, start_column)
 
-            # ERROR
             char = self.current_char
             self.advance()
             raise LexerError(f"Illegal character '{char}'", self.line, self.column)
@@ -218,52 +213,36 @@ class Lexer:
         char = self.current_char
         self.advance()
 
-        # =====================
-        # '-' or '->'
-        # =====================
         if char == "-":
             if self.current_char == ">":
                 self.advance()
                 return Token(TokenType.ARROW, "->", start_line, start_column)
             return Token(TokenType.MINUS, "-", start_line, start_column)
 
-        # =====================
-        # '=' or '=='
-        # =====================
         if char == "=":
             if self.current_char == "=":
                 self.advance()
                 return Token(TokenType.EQUAL_EQUAL, "==", start_line, start_column)
             return Token(TokenType.EQUAL, "=", start_line, start_column)
 
-        # =====================
-        # '!' or '!='
-        # =====================
         if char == "!":
             if self.current_char == "=":
                 self.advance()
                 return Token(TokenType.NOT_EQUAL, "!=", start_line, start_column)
             raise LexerError("Unexpected '!'", self.line, self.column)
-
-        # =====================
-        # '>' or '>='
-        # =====================
+       
         if char == ">":
             if self.current_char == "=":
                 self.advance()
                 return Token(TokenType.GREATER_EQUAL, ">=", start_line, start_column)
             return Token(TokenType.GREATER, ">", start_line, start_column)
 
-        # =====================
-        # '<' or '<='
-        # =====================
         if char == "<":
             if self.current_char == "=":
                 self.advance()
                 return Token(TokenType.LESS_EQUAL, "<=", start_line, start_column)
             return Token(TokenType.LESS, "<", start_line, start_column)
 
-        # fallback safety (should never happen)
         raise LexerError(f"Unknown operator '{char}'", self.line, self.column)
 
     def tokenize(self):

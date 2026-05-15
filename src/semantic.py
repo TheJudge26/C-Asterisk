@@ -9,9 +9,7 @@ from errors import SemanticError
 from error_list import ErrorReporter
 
 
-# -----------------------------
-# TYPES
-# -----------------------------
+
 SEMANTIC_TYPES = {
     "int": "int",
     "float": "float",
@@ -37,9 +35,7 @@ def normalize_type(t):
         return t.get("type")
     return t
 
-# -----------------------------
-# HELPERS
-# -----------------------------
+
 def is_array_type(t):
     return isinstance(t, str) and t.startswith("[") and t.endswith("]")
 
@@ -48,9 +44,7 @@ def get_array_inner(t):
     return t[1:-1] if is_array_type(t) else None
 
 
-# -----------------------------
-# SYMBOL TABLE
-# -----------------------------
+
 class SymbolTable:
     def __init__(self, errors):
         self.scopes = [{}]
@@ -83,9 +77,7 @@ class SymbolTable:
         return None
 
 
-# -----------------------------
-# SEMANTIC ANALYZER
-# -----------------------------
+
 class SemanticAnalyzer:
     def __init__(self):
         self.errors = ErrorReporter()
@@ -103,9 +95,7 @@ class SemanticAnalyzer:
         else:
             print("   -> Semantic analysis passed successfully")
 
-    # -----------------------------
-    # VISITOR
-    # -----------------------------
+    
     def visit(self, node):
         if isinstance(node, Program):
             return self.visit_program(node)
@@ -194,16 +184,12 @@ class SemanticAnalyzer:
 
         return None
 
-    # -----------------------------
-    # PROGRAM
-    # -----------------------------
+    
     def visit_program(self, node):
         for stmt in node.statements:
             self.visit(stmt)
 
-    # -----------------------------
-    # VAR DECL
-    # -----------------------------
+   
     def visit_var_decl(self, node):
         var_type = normalize_type(node.type_annotation)
         value_type = self.visit(node.value)
@@ -224,9 +210,7 @@ class SemanticAnalyzer:
 
         self.symbol_table.declare(node.name, var_type)
 
-    # -----------------------------
-    # ASSIGNMENT
-    # -----------------------------
+    
     def visit_assignment(self, node):
         if getattr(node, "target", None):
             var_type = self.visit(node.target) 
@@ -245,9 +229,7 @@ class SemanticAnalyzer:
                 f"Type mismatch in assignment: {var_type} vs {value_type}"
             ))
 
-    # -----------------------------
-    # BINARY OP
-    # -----------------------------
+   
     def visit_binary_op(self, node):
         left = self.visit(node.left)
         right = self.visit(node.right)
@@ -282,9 +264,7 @@ class SemanticAnalyzer:
         self.errors.add(SemanticError("Unknown operator"))
         return None
 
-    # -----------------------------
-    # IF / WHILE
-    # -----------------------------
+    
     def visit_if(self, node):
         if self.visit(node.condition) != "bool":
             self.errors.add(SemanticError("If condition must be bool"))
@@ -306,9 +286,7 @@ class SemanticAnalyzer:
         self.visit(node.body)
         self.symbol_table.exit_scope()
 
-    # -----------------------------
-    # FOR
-    # -----------------------------
+    
     def visit_for(self, node):
         self.symbol_table.enter_scope()
 
@@ -333,9 +311,8 @@ class SemanticAnalyzer:
             self.visit(stmt)
 
         self.symbol_table.exit_scope()
-    # -----------------------------
-    # FUNCTION
-    # -----------------------------
+   
+
     def visit_function(self, node):
         self.symbol_table.scopes[-1][node.name] = {
             "type": "function",
@@ -356,11 +333,9 @@ class SemanticAnalyzer:
         self.in_function = False
         self.current_return_type = None
 
-    # -----------------------------
-    # CALLS
-    # -----------------------------
+    
     def visit_call(self, node):
-        # 1. Method Calls
+        
         if getattr(node, "object", None) is not None:
             obj_type = self.visit(node.object)
             if obj_type in self.class_table:
@@ -370,19 +345,19 @@ class SemanticAnalyzer:
             self.errors.add(SemanticError(f"Method '{node.name}' not found"))
             return None
 
-        # 2. Builtins
+        
         if node.name in BUILTINS:
             for a in node.args:
                 self.visit(a)
             return BUILTINS[node.name]
 
-        # 3. Class Constructors
+        
         if node.name in self.class_table:
             for a in node.args:
                 self.visit(a)
             return node.name
 
-        # 4. Standard Functions
+        
         func = None
         for scope in reversed(self.symbol_table.scopes):
             if node.name in scope:
@@ -405,15 +380,13 @@ class SemanticAnalyzer:
 
         self.errors.add(SemanticError(f"Function '{node.name}' not declared"))
         return None
-        # -----------------------------------------------------
-
-        
-        
         
 
-    # -----------------------------
-    # ARRAY
-    # -----------------------------
+        
+        
+        
+
+    
     def visit_array_literal(self, node):
         if not node.elements:
             return "[any]"
@@ -427,9 +400,7 @@ class SemanticAnalyzer:
 
         return f"[{t}]"
 
-    # -----------------------------
-    # CLASS
-    # -----------------------------
+    
     def visit_class(self, node):
         if node.name in self.class_table:
             self.errors.add(SemanticError("Duplicate class"))
@@ -461,9 +432,7 @@ class SemanticAnalyzer:
             self.visit(m)
         self.symbol_table.exit_scope()
 
-    # -----------------------------
-    # MEMBER ACCESS
-    # -----------------------------
+    
     def visit_member_access(self, node):
         obj = self.visit(node.object)
 

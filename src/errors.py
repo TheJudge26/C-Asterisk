@@ -3,7 +3,6 @@ class CompilerError(Exception):
         self.line = line
         self.column = column
 
-        # Human-readable message
         if line is not None and column is not None:
             full_message = f"The error is: {message} | Located at Line {line}, Column {column}"
         elif line is not None:

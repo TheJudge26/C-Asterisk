@@ -16,7 +16,7 @@ class ASTPrinter:
             print(f"{self.indent}{marker}{prefix}None")
             return
 
-        # Print the current node
+        
         name = type(node).__name__
         val = f" ({node.value})" if hasattr(node, 'value') else ""
         if hasattr(node, 'name') and not isinstance(node.name, (Variable, ArrayIndex)):
@@ -24,11 +24,11 @@ class ASTPrinter:
             
         print(f"{self.indent}{marker}{prefix}{name}{val}")
 
-        # Prepare for children
+        
         old_indent = self.indent
         self.indent += "    " if is_last else "|   "
 
-        # Logic for specific nodes to find their "children"
+        
         if isinstance(node, Program):
             for i, stmt in enumerate(node.statements):
                 self.print_node(stmt, is_last=(i == len(node.statements) - 1))
@@ -58,7 +58,7 @@ class ASTPrinter:
                 self.print_node(arg, label=f"Arg[{i}]", is_last=(i == len(node.args) - 1))
 
         elif isinstance(node, ArrayIndex):
-            # This handles recursive indexing like matrix[i][j]
+            
             self.print_node(node.array, label="Base", is_last=False)
             self.print_node(node.index, label="Index", is_last=True)
 
