@@ -1,5 +1,6 @@
 import sys
 import os
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 from lexer import Lexer
 from parser import Parser
 from semantic import SemanticAnalyzer
