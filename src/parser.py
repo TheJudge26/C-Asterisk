@@ -1,17 +1,9 @@
 from tokens import TokenType
 from errors import ParserError
 
-
-# =========================
-# AST BASE
-# =========================
 class AST:
     pass
 
-
-# =========================
-# LITERALS
-# =========================
 class Number(AST):
     def __init__(self, value):
         self.value = value
@@ -32,9 +24,8 @@ class BoolNode(AST):
         self.value = value
 
 
-# =========================
-# EXPRESSIONS
-# =========================
+# expressions
+
 class Variable(AST):
     def __init__(self, name):
         self.name = name
@@ -53,10 +44,8 @@ class BinaryOp(AST):
         self.op = op
         self.right = right
 
+# statement
 
-# =========================
-# STATEMENTS
-# =========================
 class VarDecl(AST):
     def __init__(self, name, type_annotation, value):
         self.name = name
@@ -104,21 +93,16 @@ class ExpressionStatement(AST):
     def __init__(self, expression):
         self.expression = expression
 
-
-# =========================
-# FUNCTIONS
-# =========================
+# function
 class Function(AST):
-    def __init__(self, name, params, return_type, body):
+    def __init__(self, name, params, return_type, body):   #->
         self.name = name
         self.params = params
         self.return_type = return_type
         self.body = body
 
+# array
 
-# =========================
-# ARRAYS
-# =========================
 class ArrayLiteral(AST):
     def __init__(self, elements):
         self.elements = elements
@@ -129,29 +113,22 @@ class ArrayIndex(AST):
         self.array = array
         self.index = index
 
+# program
 
-# =========================
-# PROGRAM
-# =========================
 class Program(AST):
     def __init__(self, statements):
         self.statements = statements
 
+#clases
 
-# =========================
-# CLASSES
-# =========================
 class ClassDecl(AST):
     def __init__(self, name, body):
         self.name = name
         self.body = body
-
-
 class MemberAccess(AST):
     def __init__(self, obj, member):
         self.object = obj
         self.member = member
-
 
 class Import(AST):
     def __init__(self, module):
@@ -173,9 +150,7 @@ PRECEDENCE = {
     TokenType.DIVIDE: 4,
 }
 
-# =========================
-# PARSER
-# =========================
+# parser
 class Parser:
     def __init__(self, tokens):
         self.tokens = tokens
@@ -212,9 +187,7 @@ class Parser:
                 return
             self.advance()
 
-    # =========================
-    # ENTRY
-    # =========================
+    # entry
     def parse(self):
         statements = []
         while self.current.type != TokenType.EOF:
@@ -228,9 +201,8 @@ class Parser:
                 self.synchronize()
         return Program(statements)
 
-    # =========================
-    # STATEMENTS
-    # =========================
+    
+    # statements
     def statement(self):
         if self.current.type == TokenType.LET:
             return self.var_decl()
@@ -301,9 +273,7 @@ class Parser:
 
         return While(condition, body)
 
-    # =========================
-    # FUNCTION DECL
-    # =========================
+    # function decl
     def function_decl(self):
         self.eat(TokenType.FUNC)
         name = self.current.value
@@ -343,9 +313,8 @@ class Parser:
 
         return {"name": name, "type": str(t)}
 
-    # =========================
-    # CLASS / IMPORT
-    # =========================
+    # class+import
+    
     def class_decl(self):
         self.eat(TokenType.CLASS)
         name = self.current.value
@@ -358,9 +327,8 @@ class Parser:
         self.eat(TokenType.IDENTIFIER)
         return Import(module)
 
-    # =========================
     # BLOCK
-    # =========================
+    
     def block(self):
         statements = []
         self.eat(TokenType.LBRACE)
@@ -371,9 +339,7 @@ class Parser:
         self.eat(TokenType.RBRACE)
         return statements
 
-    # =========================
-    # FOR LOOP 
-    # =========================
+    # for
     def for_stmt(self):
         self.eat(TokenType.FOR)
         var = self.current.value
@@ -389,9 +355,7 @@ class Parser:
 
         return For(var, iterable, body)
 
-    # ======================
-    # EXPRESSIONS 
-    # ==================
+    # expressions
     def primary(self):
         token = self.current
 
@@ -492,9 +456,8 @@ class Parser:
 
         raise ParserError(f"Unexpected {token.type}", token.line, token.column)
 
-    # =========================
-    # EXPRESSIONS WRAPPER
-    # =========================
+    # expressions wrap
+    
     def expression(self, precedence=0):
         left = self.primary()
 

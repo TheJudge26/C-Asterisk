@@ -1,7 +1,10 @@
 let x: float = 100  
-let y: float = 2.5
+let y: float = 5.
 let result = x / y
 
 if result >= 40.0 {
-    print("Math and Promotion work")
+    print("Math work")
+}
+if result <= 40.0 {
+    print("Math worked")
 }

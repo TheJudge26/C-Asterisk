@@ -60,7 +60,7 @@ def main():
 
     
 
-    # 1. Lexer
+    
     print("1. Lexing...")
     try:
         lexer = Lexer(source_code)
@@ -69,13 +69,13 @@ def main():
         print(f"[Lexer Error] {e}")
         sys.exit(1)
 
-    # 2. Parser
+    
     print("2. Parsing...")
     
     parser = Parser(tokens)
     ast = parser.parse()
 
-    # ERROR CHECK 
+    
     if parser.errors:
         print("\n--- PARSER ERRORS ---")
         for err in parser.errors:
@@ -91,7 +91,7 @@ def main():
     printer.print_node(ast)
     print("----------------------------------\n")
 
-    # 3. Semantic Analysis
+    
     print("3. Semantic Analysis...")
     try:
         analyzer = SemanticAnalyzer()
@@ -106,7 +106,7 @@ def main():
         sys.exit(1)
 
 
-    # 4. Code Generation
+    
     print("4. Generating LLVM IR...")
     try:
         codegen = LLVMCodeGenerator()
@@ -119,14 +119,14 @@ def main():
 
     
     #test too
-    # 5. Execution and Compilation
+    
     try:
         _try_load_lib_io()
 
         codegen.execute()
         
 
-        # create the 'obj' folder 
+        
         os.makedirs("obj", exist_ok=True) 
         
         base_name = os.path.splitext(os.path.basename(file_path))[0]

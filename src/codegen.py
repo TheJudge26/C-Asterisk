@@ -29,11 +29,10 @@ class LLVMCodeGenerator:
 
         printf_ty = ir.FunctionType(self.i32, [self.i8_ptr], var_arg=True)
         self.printf = ir.Function(self.module, printf_ty, name="printf")
-        # Link the C math library 'exp' function
         exp_ty = ir.FunctionType(self.f64, [self.f64])
         self.exp_func = ir.Function(self.module, exp_ty, name="exp")
     
-        # The C function takes a string (char*) and an integer (int), and returns a float pointer (double*)
+        
         csv_ty = ir.FunctionType(self.f64.as_pointer(), [self.i8_ptr, self.i32])
         self.load_csv_func = ir.Function(self.module, csv_ty, name="load_csv_native")
 
@@ -46,7 +45,7 @@ class LLVMCodeGenerator:
         pow_ty = ir.FunctionType(self.f64, [self.f64, self.f64])
         self.pow_func = ir.Function(self.module, pow_ty, name="pow")
 
-# C Standard Library String
+
         self.strlen = ir.Function(self.module, ir.FunctionType(self.i32, [self.i8_ptr]), name="strlen")
         self.strcpy = ir.Function(self.module, ir.FunctionType(self.i8_ptr, [self.i8_ptr, self.i8_ptr]), name="strcpy")
         self.strcat = ir.Function(self.module, ir.FunctionType(self.i8_ptr, [self.i8_ptr, self.i8_ptr]), name="strcat")
@@ -61,10 +60,7 @@ class LLVMCodeGenerator:
         ir_str = re.sub(r'\bfcmp o', 'fcmp fast o', ir_str) 
         return ir_str
         
-
-    # =====================================================
-    # CORE
-    # =====================================================
+        #core
     def generate(self, ast):
         self.visit(ast)
         print(self.module)
@@ -77,9 +73,7 @@ class LLVMCodeGenerator:
     def generic_visit(self, node):
         raise Exception(f"No visit_{type(node).__name__}")
 
-    # =====================================================
-    # PROGRAM
-    # =====================================================
+    #program
     def visit_Program(self, node):
         fn_type = ir.FunctionType(self.i32, [])
         main = ir.Function(self.module, fn_type, name="main")
@@ -93,9 +87,8 @@ class LLVMCodeGenerator:
         if not self.builder.block.is_terminated:
             self.builder.ret(ir.Constant(self.i32, 0))
 
-    # =====================================================
-    # LITERALS
-    # =====================================================
+    # literals
+    
     def visit_Number(self, node):
         return ir.Constant(self.i32, int(node.value))
 
@@ -117,12 +110,10 @@ class LLVMCodeGenerator:
 
         return self.builder.gep(glob, [self.i32(0), self.i32(0)])
 
-    # ============
-    # VARIABLES 
-    # =========
+   #variables
     def visit_VarDecl(self, node):
         val = self.visit(node.value)
-        # allocate memory based on the ACTUAL type of the value
+        
         ptr = self.builder.alloca(val.type, name=node.name)
         self.variables[node.name] = ptr
         self.builder.store(val, ptr)
@@ -147,9 +138,8 @@ class LLVMCodeGenerator:
     def visit_ExpressionStatement(self, node):
         return self.visit(node.expression)
 
-    # =====================================================
-    # BINARY OPERATIONS
-    # =====================================================
+    # binary oper
+    
     def visit_BinaryOp(self, node):
         l = self.visit(node.left)
         r = self.visit(node.right)
@@ -201,7 +191,7 @@ class LLVMCodeGenerator:
         if node.op in (TokenType.GREATER, TokenType.LESS, TokenType.EQUAL_EQUAL, 
                        TokenType.NOT_EQUAL, TokenType.GREATER_EQUAL, TokenType.LESS_EQUAL):
             
-            # map tokens to exact LLVM comparison 
+        
             op_map = {
                 TokenType.GREATER: ">",
                 TokenType.LESS: "<",
@@ -217,9 +207,7 @@ class LLVMCodeGenerator:
             else:
                 return self.builder.icmp_signed(llvm_op, l, r)
 
-    # =====
-    # PRINT
-    # =========
+
     def visit_Print(self, node):
         val = self.visit(node.value)
 
@@ -243,9 +231,7 @@ class LLVMCodeGenerator:
 
         return self.builder.gep(glob, [self.i32(0), self.i32(0)])
 
-    # ============
-    # CONTROL FLOW
-    # ==============
+    #flow
     def visit_If(self, node):
         cond = self.visit(node.condition)
         cond = self.builder.icmp_signed("!=", cond, self.i32(0))
@@ -290,9 +276,7 @@ class LLVMCodeGenerator:
 
         self.builder.position_at_end(end_bb)
 
-    # =============
-    # FUNCTIONS 
-    # =============
+    #func.
     def visit_Function(self, node):
         ret_ty = self.f64 if node.return_type == "float" else self.i32
 
@@ -339,9 +323,7 @@ class LLVMCodeGenerator:
         self.builder.ret(self.visit(node.value))
 
 
-# =====================================================
-    # CALLS (LEN & METHODS)
-    # =====================================================
+ #calls
     def visit_Call(self, node):
         
         # 1. Handle Method Calls (e.g. n.calculate())
@@ -355,7 +337,7 @@ class LLVMCodeGenerator:
             args = [obj_ptr] + [self.visit(a) for a in node.args]
             return self.builder.call(func, args)
         
-        # handle load_csv built-in function
+        # handle load_csv built in function
         if node.name == "load_csv":
             filename = self.visit(node.args[0])
             num_values = self.visit(node.args[1])
@@ -372,15 +354,14 @@ class LLVMCodeGenerator:
                     
                     
                     if isinstance(val.type, ir.ArrayType) and isinstance(field_ptr.type.pointee, ir.PointerType):
-                        
-                        #se how many bytes we need 
+                      
                         element_size = 8 if isinstance(val.type.element, ir.DoubleType) else 4
                         total_bytes = val.type.count * element_size                   
-                        # malloc instead of alloca
+                        
                         raw_mem = self.builder.call(self.malloc, [ir.Constant(self.i32, total_bytes)])                        
-                        # match array and ram
+                    
                         array_ptr = self.builder.bitcast(raw_mem, val.type.as_pointer())
-                        # store memory
+                       
                         self.builder.store(val, array_ptr) 
                         val = self.builder.bitcast(array_ptr, field_ptr.type.pointee)
                     
@@ -431,10 +412,6 @@ class LLVMCodeGenerator:
         return self.builder.call(func, args)
     
     
-
-    # ===============
-    # MEMBER ACCESS
-    # ===============
     def visit_MemberAccess(self, node):
         """Pulls a specific field out of an object (e.g. obj.field)."""
         obj_ptr = self.variables[node.object.name]
@@ -445,9 +422,7 @@ class LLVMCodeGenerator:
         ptr = self.builder.gep(obj_ptr, [self.i32(0), self.i32(field_idx)], inbounds=True)
         return self.builder.load(ptr)
 
-    # ==========
-    # FOR LOOPS 
-    # ==========
+   #for
     
     def visit_For(self, node):
         iterable_val = self.visit(node.iterable) 
@@ -502,10 +477,7 @@ class LLVMCodeGenerator:
         
         self.builder.branch(cond_bb)
         self.builder.position_at_end(end_bb)
-
-    # ============================
-    # MULTI-DIMENSIONAL ARRAYS 
-    # ===========================
+  #arrays
     def get_ptr(self, node):
         """Recursively finds the exact memory address for variables, class fields, and chained array indices."""
         if type(node).__name__ == "Variable":
@@ -646,9 +618,7 @@ class LLVMCodeGenerator:
             print(f"--- Program Exited with code {result} ---")
 
     
-    # =====================================================
-    # ARRAYS (DYNAMIC MEMORY)
-    # =====================================================
+    #dynamic memory
     def visit_ArrayLiteral(self, node):
         elements = [self.visit(el) for el in node.elements]
         if not elements:
@@ -657,9 +627,6 @@ class LLVMCodeGenerator:
         elem_ty = elements[0].type
         arr_ty = ir.ArrayType(elem_ty, len(elements))
 
-        # --- THE LLVM MEMORY OPTIMIZATION  ---
-        # If the array is purely raw numbers (like our massive CSV dataset)
-        # we skip the 40,000 store instructions and package it instantly
         if all(isinstance(val, ir.Constant) for val in elements):
             return ir.Constant(arr_ty, elements)
         
