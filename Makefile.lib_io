@@ -1,0 +1,17 @@
+# Native helper for load_csv — build once per machine.
+# Usage: make -f Makefile.lib_io lib_io
+
+LIB_IO_SRC := src/lib_io.c
+CC ?= cc
+
+UNAME_S := $(shell uname -s 2>/dev/null || echo Linux)
+
+ifeq ($(UNAME_S),Darwin)
+  LIB_IO_OUT := src/lib_io.dylib
+else
+  LIB_IO_OUT := src/lib_io.so
+endif
+
+.PHONY: lib_io
+lib_io:
+	$(CC) -shared -fPIC -O2 -o $(LIB_IO_OUT) $(LIB_IO_SRC) -lm

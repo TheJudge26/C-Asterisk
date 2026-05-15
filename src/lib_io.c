@@ -2,8 +2,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(_WIN32) || defined(__CYGWIN__)
+#define LIBIO_API __declspec(dllexport)
+#elif defined(__GNUC__) && __GNUC__ >= 4
+#define LIBIO_API __attribute__((visibility("default")))
+#else
+#define LIBIO_API
+#endif
 
-__declspec(dllexport) double* load_csv_native(char* filename, int num_values) {
+LIBIO_API double* load_csv_native(char* filename, int num_values) {
     
     
     double* memory = (double*)malloc(num_values * sizeof(double));
@@ -24,9 +31,17 @@ __declspec(dllexport) double* load_csv_native(char* filename, int num_values) {
     long filesize = ftell(file);
     fseek(file, 0, SEEK_SET);
 
-    //  Dump the file into RAM at once 
-    char* buffer = (char*)malloc(filesize + 1);
-    fread(buffer, 1, filesize, file);
+    //  Dump the file into RAM at once
+    char* buffer = (char*)malloc((size_t)filesize + 1);
+    if (buffer == NULL) {
+        fclose(file);
+        return memory;
+    }
+    if (fread(buffer, 1, (size_t)filesize, file) != (size_t)filesize) {
+        free(buffer);
+        fclose(file);
+        return memory;
+    }
     buffer[filesize] = '\0';
     fclose(file);
 
