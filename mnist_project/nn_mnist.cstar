@@ -1,0 +1,150 @@
+# ─────────────────────────────────────────────────────────────
+#  2-Layer Neural Network in C* (C-Asterisk)
+#  Architecture:  Input(400)  →  Hidden(64, ReLU)  →  Output(1, Sigmoid)
+#  Dataset:       MNIST Binary 0 vs 1  —  1000 samples
+#
+#  Flat array layout:
+#    data:  1000 rows × 401 cols  →  data[i*401 + p] = pixel p of sample i
+#                                    data[i*401 + 400] = label
+#    W1:    400 × 64  row-major   →  W1[p*64 + h]
+#    W2:    64  × 1               →  W2[h]
+# ─────────────────────────────────────────────────────────────
+
+class NeuralNet {
+
+    # ── DATA ──────────────────────────────────────────────────
+    let data: [float] = load_csv("mnist_project/data/Mnist_Binary_0_vs_1_1000_20x20.csv", 401000)
+
+    # ── WEIGHTS (Xavier initialized, loaded from CSV) ─────────
+    let W1: [float] = load_csv("mnist_project/data/W1.csv", 25600)   # 400 * 64
+    let b1: [float] = load_csv("mnist_project/data/b1.csv", 64)
+    let W2: [float] = load_csv("mnist_project/data/W2.csv", 64)      # 64 * 1
+    let b2: [float] = load_csv("mnist_project/data/b2.csv", 1)
+
+    # ── SCRATCH BUFFER for storing hidden activations ─────────
+    let z1_cache: [float] = load_csv("mnist_project/data/b1.csv", 64)
+    let a1_cache: [float] = load_csv("mnist_project/data/b1.csv", 64)
+
+    # ── HYPERPARAMETERS ───────────────────────────────────────
+    let lr: float = 0.01
+
+    # ── FORWARD PASS ONLY (store z1 and a1 for use in backprop) ──
+    func forward_one(i: int) -> float {
+
+        let base: int = i * 401
+
+        # ── Layer 1: z1[h] = sum(x[p] * W1[p*64+h]) + b1[h] ──
+        # ── a1[h] = relu(z1[h]) ────────────────────────────────
+        for h in 64 {
+            let z1_h: float = self.b1[h]
+            for p in 400 {
+                let w1_idx: int = (p * 64) + h
+                let d_idx:  int = base + p
+                z1_h = z1_h + (self.data[d_idx] * self.W1[w1_idx])
+            }
+            self.z1_cache[h] = z1_h
+            
+            # relu
+            let a1_h: float = 0.0
+            if z1_h > 0.0 { a1_h = z1_h }
+            self.a1_cache[h] = a1_h
+        }
+
+        # ── Layer 2: z2 = sum(a1[h] * W2[h]) + b2 ─────────────
+        let z2: float = self.b2[0]
+        for h in 64 {
+            z2 = z2 + (self.a1_cache[h] * self.W2[h])
+        }
+
+        # sigmoid
+        let neg_z2: float = 0.0 - z2
+        let a2: float = 1.0 / (1.0 + exp(neg_z2))
+
+        return a2
+    }
+
+    # ── BACKWARD PASS (use cached z1 and a1, no recomputation) ──
+    func backward_one(i: int, a2: float, label: float) -> int {
+
+        let base: int = i * 401
+        let d_a2: float = a2 - label
+
+        # Update W2 and b2
+        for h in 64 {
+            self.W2[h] = self.W2[h] - (self.lr * d_a2 * self.a1_cache[h])
+        }
+        self.b2[0] = self.b2[0] - (self.lr * d_a2)
+
+        # Update W1 and b1 using cached activations
+        for h in 64 {
+            # relu derivative (1 if z1_h > 0, else 0)
+            let relu_d: float = 0.0
+            if self.z1_cache[h] > 0.0 { relu_d = 1.0 }
+
+            # Hidden layer gradient
+            let d_a1_h: float = d_a2 * self.W2[h] * relu_d
+
+            # Update W1 weights for this hidden unit
+            for p in 400 {
+                let w1_idx: int = (p * 64) + h
+                let d_idx:  int = base + p
+                self.W1[w1_idx] = self.W1[w1_idx] - (self.lr * d_a1_h * self.data[d_idx])
+            }
+
+            # Update b1[h]
+            self.b1[h] = self.b1[h] - (self.lr * d_a1_h)
+        }
+
+        return 1
+    }
+
+    # ── TRAIN ONE SAMPLE (forward + backward) ──────────────────
+    func train_one(i: int) -> float {
+        let a2: float = self.forward_one(i)
+
+        let label_idx: int = i * 401 + 400
+        let label: float = self.data[label_idx]
+
+        self.backward_one(i, a2, label)
+
+        return a2
+    }
+
+    # ── TRAIN — 10 epochs over all 1000 samples ───────────────
+    func train() -> int {
+        for epoch in 10 {
+            for i in 1000 {
+                self.train_one(i)
+            }
+        }
+        return 1
+    }
+
+    # ── TEST — classify all 1000 samples (forward only) ────────
+    func test() -> int {
+        let correct: int = 0
+
+        for i in 1000 {
+            let a2: float = self.forward_one(i)
+            let pred: float = 0.0
+            if a2 > 0.5 { pred = 1.0 }
+
+            let label_idx: int = i * 401 + 400
+            let label: float = self.data[label_idx]
+
+            if pred == label { correct = correct + 1 }
+        }
+
+        return correct
+    }
+}
+
+# ─── MAIN ─────────────────────────────────────────────────────
+print(9999.0)
+
+let net = NeuralNet()
+net.train()
+let accuracy: int = net.test()
+print(accuracy)
+
+print(1111.0)

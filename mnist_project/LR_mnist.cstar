@@ -1,0 +1,111 @@
+# ─────────────────────────────────────────────────────────
+#  MNIST Binary Classifier in C* (C-Asterisk)
+#  Logistic Regression — 5 epochs, 1000 samples, 400 pixels
+#
+#  How the flat CSV layout works:
+#    Row i  →  pixels at indices  [i*401 + 0]  to  [i*401 + 399]
+#              label  at index    [i*401 + 400]
+#
+#  load_csv(path, total_values) loads the file into a 1D [float]
+#  skipping the text header automatically via the C library.
+# ─────────────────────────────────────────────────────────
+
+class MnistTrainer {
+
+    # ── DATA ──────────────────────────────────────────────
+    # Full dataset: 1000 rows × 401 columns = 401000 values
+    let data:    [float] = load_csv("mnist_project/data/Mnist_Binary_0_vs_1_1000_20x20.csv", 401000)
+
+    # Initial weights: 400 zeros loaded from a flat CSV
+    let weights: [float] = load_csv("mnist_project/data/weights.csv", 400)
+
+    # Scalar parameters
+    let bias: float = 0.0
+    let lr:   float = 0.1
+
+    # ── TRAIN ─────────────────────────────────────────────
+    # 5 epochs of stochastic gradient descent
+    func train() -> int {
+
+        for epoch in 5 {
+
+            for i in 1000 {
+
+                # --- Forward pass ---
+                # Base offset for sample i in the flat array (401 values per row)
+                let base: int = i * 401
+
+                let z: float = self.bias
+                for p in 400 {
+                    let idx: int = base + p
+                    z = z + (self.data[idx] * self.weights[p])
+                }
+
+                # Sigmoid activation: 1 / (1 + e^-z)
+                let neg_z: float = 0.0 - z
+                let pred:  float = 1.0 / (1.0 + exp(neg_z))
+
+                # Label is stored at column 400 of each row
+                let label_idx: int = base + 400
+                let label:     float = self.data[label_idx]
+
+                # --- Gradient descent update ---
+                let err: float = label - pred
+
+                for p in 400 {
+                    let idx: int = base + p
+                    self.weights[p] = self.weights[p] + (self.lr * err * self.data[idx])
+                }
+                self.bias = self.bias + (self.lr * err)
+            }
+        }
+
+        return 1
+    }
+
+    # ── TEST ──────────────────────────────────────────────
+    # Classify all 1000 samples and return the number correct
+    func test() -> int {
+
+        let correct: int = 0
+
+        for i in 1000 {
+
+            let base: int = i * 401
+
+            let z: float = self.bias
+            for p in 400 {
+                let idx: int = base + p
+                z = z + (self.data[idx] * self.weights[p])
+            }
+
+            # Threshold at 0 (equivalent to sigmoid > 0.5)
+            let pred: float = 0.0
+            if z > 0.0 {
+                pred = 1.0
+            }
+
+            let label_idx: int = base + 400
+            let label:     float = self.data[label_idx]
+
+            if pred == label {
+                correct = correct + 1
+            }
+        }
+
+        return correct
+    }
+}
+
+# ─── MAIN ────────────────────────────────────────────────
+print(9999.0)   # start marker (makes it easy to spot in output)
+
+let model = MnistTrainer()
+
+model.train()
+
+let accuracy: int = model.test()
+
+print(accuracy)   # prints correct count out of 1000
+
+print(1111.0)   # end marker

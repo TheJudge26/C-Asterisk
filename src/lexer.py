@@ -184,9 +184,7 @@ class Lexer:
                 if next_char is not None and next_char.isdigit():
                     return self.number()
 
-                # prev_char = self.text[self.position - 1] if self.position > 0 else None
-                # if prev_char is not None and prev_char.isdigit():
-                #     raise LexerError("Invalid number format", start_line, start_column)
+                
 
                 self.advance()
                 return Token(TokenType.DOT, ".", start_line, start_column)

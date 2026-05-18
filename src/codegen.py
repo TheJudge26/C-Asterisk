@@ -285,8 +285,11 @@ class LLVMCodeGenerator:
         for p in node.params:
             if p["type"] == "float":
                 param_types.append(self.f64)
+            elif p["type"] == "[float]":
+                param_types.append(self.f64.as_pointer())
+            elif p["type"] == "[int]":
+                param_types.append(self.i32.as_pointer())
             elif p["type"] in self.classes:
-                
                 param_types.append(self.classes[p["type"]]["type"].as_pointer())
             else:
                 param_types.append(self.i32)
@@ -303,7 +306,9 @@ class LLVMCodeGenerator:
 
         for i, p in enumerate(node.params):
             if p["name"] == "self":
-                
+                self.variables[p["name"]] = func.args[i]
+            elif p["type"] in ("[float]", "[int]"):
+                # Array params are already pointers — store directly, no alloca
                 self.variables[p["name"]] = func.args[i]
             else:
                 ptr = self.builder.alloca(param_types[i], name=p["name"])
@@ -326,7 +331,6 @@ class LLVMCodeGenerator:
  #calls
     def visit_Call(self, node):
         
-        # 1. Handle Method Calls (e.g. n.calculate())
         if getattr(node, "object", None) is not None:
             obj_ptr = self.variables[node.object.name]
             class_name = obj_ptr.type.pointee.name
@@ -481,7 +485,13 @@ class LLVMCodeGenerator:
     def get_ptr(self, node):
         """Recursively finds the exact memory address for variables, class fields, and chained array indices."""
         if type(node).__name__ == "Variable":
-            return self.variables[node.name]
+            var = self.variables[node.name]
+            # If the variable IS a raw pointer (e.g. [float] param), return it directly
+            if isinstance(var.type, ir.PointerType) and not isinstance(var.type.pointee, ir.PointerType):
+                # Check it's not a struct pointer (class instance)
+                if not hasattr(var.type.pointee, 'name'):
+                    return var
+            return var
             
         elif type(node).__name__ == "MemberAccess":
             obj_ptr = self.variables[node.object.name]
@@ -493,14 +503,17 @@ class LLVMCodeGenerator:
             base_ptr = self.get_ptr(node.array)
             idx = self.visit(node.index)
             
-            
-            if isinstance(base_ptr.type.pointee, ir.PointerType):
-                actual_ptr = self.builder.load(base_ptr)
-                return self.builder.gep(actual_ptr, [idx], inbounds=True)
-            else:
-                
-                return self.builder.gep(base_ptr, [self.i32(0), idx], inbounds=True)
-            
+            if isinstance(base_ptr.type, ir.PointerType):
+                pointee = base_ptr.type.pointee
+                if isinstance(pointee, ir.PointerType):
+                    # double pointer: load first then gep
+                    actual_ptr = self.builder.load(base_ptr)
+                    return self.builder.gep(actual_ptr, [idx], inbounds=True)
+                elif isinstance(pointee, ir.ArrayType):
+                    return self.builder.gep(base_ptr, [self.i32(0), idx], inbounds=True)
+                else:
+                    # raw pointer (float* from load_csv or array param)
+                    return self.builder.gep(base_ptr, [idx], inbounds=True)
             
         raise Exception(f"Cannot get pointer for {type(node).__name__}")
 
