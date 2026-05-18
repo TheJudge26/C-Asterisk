@@ -24,49 +24,134 @@ C* is directly inspired by **Mojo** (developed by Chris Lattner, the original cr
 
 ---
 
-##  The MNIST Benchmark: ~20x Faster Than Pure Python
+## The MNIST Benchmark Suite
 
-To prove C* isn't just theoretical, we implemented a **Single-Layer Perceptron** (a neural network) in pure C* and raced it against the mathematically identical implementation in pure Python. Both programs trained on 100 images from the MNIST handwritten digit dataset (binary classification: 0 vs. 1) and predicted on 10 unseen test images.
+To prove C* is not just theoretical, we ran a full benchmark suite against Python, C++, and Go on the MNIST handwritten digit dataset (binary classification: 0 vs. 1, 1000 samples, 20x20 images unrolled to 400 pixels).
 
-No NumPy. No PyTorch. No C++ libraries. Just raw math, compiled to native code.
+Every benchmark was held to the same strict rules:
 
-| Language | Training Time | Accuracy |
-|---|---|---|
-| Pure Python | **0.860 seconds** | 10/10 |
-| **C* (LLVM compiled)** | **0.045 seconds** | **10/10** |
+- Same dataset, same file paths, same weight initialization (loaded from the same CSV files)
+- Same CSV loading strategy across all four languages — a flat value stream, header skipped explicitly
+- Same math: identical forward pass, backward pass, and weight update formulas
+- No external ML libraries — no NumPy, no PyTorch, no Eigen
+- No compiler optimization flags — C++ compiled with plain `g++`, no `-O2` or `-O3`
+- All timings measured from first instruction to last, including data loading
 
-**C* trained ~19× faster, with identical accuracy.**
+The benchmarks were run twice: once for **Logistic Regression** (a single-layer model) and once for a **2-Layer Neural Network** with a hidden layer of 64 neurons using ReLU activation and sigmoid output.
 
-The Python implementation uses standard `math.exp`, list comprehensions, and nested loops. The C* version — written in a language we built ourselves — compiles those same loops and arithmetic directly to x86-64 machine code through LLVM, achieving performance indistinguishable from hand-written C.
+---
+
+### Benchmark 1 — Logistic Regression
+
+Architecture: Input (400 pixels) -> Output (1 neuron, Sigmoid)
+Training: 5 epochs, 1000 samples, learning rate 0.1
+
+| Language | Load Time | Training Time | Test Time | Total Time | Accuracy |
+|---|---|---|---|---|---|
+| Python | 0.186s | 0.614s | 0.040s | **0.841s** | 1000/1000 |
+| C* (LLVM) | — | — | — | **0.023s** | 1000/1000 |
+
+**C* is ~37x faster than Python on Logistic Regression.**
+
+The Python implementation spends the majority of its time in the training loop — 5 x 1000 x 400 = 2 million multiply-accumulate operations interpreted one by one. C* compiles those exact same loops to native x86-64 machine code through LLVM and finishes the entire program before Python has completed loading the dataset.
 
 ```cstar
-# This is the actual C* code that beat Python by 19x.
-class NativeAI {
-    let weights: [float] = [0.0, 0.0, ...]  # 400 weights
+class MnistTrainer {
+    let data:    [float] = load_csv("mnist_project/data/Mnist_Binary_0_vs_1_1000_20x20.csv", 401000)
+    let weights: [float] = load_csv("mnist_project/data/weights.csv", 400)
     let bias: float = 0.0
-    let lr: float = 0.1
+    let lr:   float = 0.1
 
-    func train() -> float {
-        for epoch in 20 {
-            for i in 100 {
-                let sum: float = self.bias
+    func train() -> int {
+        for epoch in 5 {
+            for i in 1000 {
+                let base: int = i * 401
+                let z: float = self.bias
                 for p in 400 {
-                    let idx: int = (i * 400) + p
-                    sum = sum + (self.train_img[idx] * self.weights[p])
+                    let idx: int = base + p
+                    z = z + (self.data[idx] * self.weights[p])
                 }
-                let pred: float = 1.0 / (1.0 + exp(0.0 - sum))
-                let err: float = self.train_lbl[i] - pred
+                let neg_z: float = 0.0 - z
+                let pred:  float = 1.0 / (1.0 + exp(neg_z))
+                let label_idx: int = base + 400
+                let err: float = self.data[label_idx] - pred
                 for p in 400 {
-                    let idx: int = (i * 400) + p
-                    self.weights[p] = self.weights[p] + (self.lr * err * self.train_img[idx])
+                    let idx: int = base + p
+                    self.weights[p] = self.weights[p] + (self.lr * err * self.data[idx])
                 }
                 self.bias = self.bias + (self.lr * err)
             }
         }
-        return 1.0
+        return 1
     }
 }
 ```
+
+---
+
+### Benchmark 2 — 2-Layer Neural Network
+
+Architecture: Input (400) -> Hidden (64 neurons, ReLU) -> Output (1 neuron, Sigmoid)
+Training: 10 epochs, 1000 samples, learning rate 0.01, Xavier weight initialization
+
+This is a real neural network with a full forward pass and backpropagation. Each training step computes layer-1 activations, caches them, computes the output, then propagates the gradient back through both layers to update 25,664 weights. All four languages implement the identical algorithm — single forward pass with cached activations reused in backprop, no redundant computation.
+
+| Language | Load Time | Training Time | Test Time | Total Time | Accuracy |
+|---|---|---|---|---|---|
+| Python | 0.179s | 88.683s | 2.547s | **91.419s** | 1000/1000 |
+| Go | 0.072s | 0.917s | 0.043s | **1.061s** | 1000/1000 |
+| C++ | ~0.000s | 0.877s | 0.036s | **0.916s** | 1000/1000 |
+| C* (LLVM) | — | — | — | **0.944s** | 1000/1000 |
+
+**C* is ~97x faster than Python, on par with C++, and faster than Go.**
+
+The gap between C* and Python grows with the size of the problem. A neural network performs roughly 128x more floating point operations per epoch than logistic regression. Python's interpreter overhead compounds with every additional operation. C* compiles the same math to the same machine instructions a C++ compiler would produce — the difference between C* and C++ is within normal run-to-run variance and does not represent a meaningful performance gap.
+
+```cstar
+class NeuralNet {
+    let data:     [float] = load_csv("mnist_project/data/Mnist_Binary_0_vs_1_1000_20x20.csv", 401000)
+    let W1:       [float] = load_csv("mnist_project/data/W1.csv", 25600)
+    let b1:       [float] = load_csv("mnist_project/data/b1.csv", 64)
+    let W2:       [float] = load_csv("mnist_project/data/W2.csv", 64)
+    let b2:       [float] = load_csv("mnist_project/data/b2.csv", 1)
+    let z1_cache: [float] = load_csv("mnist_project/data/b1.csv", 64)
+    let a1_cache: [float] = load_csv("mnist_project/data/b1.csv", 64)
+    let lr: float = 0.01
+
+    func forward_one(i: int) -> float {
+        let base: int = i * 401
+        for h in 64 {
+            let z1_h: float = self.b1[h]
+            for p in 400 {
+                let w1_idx: int = (p * 64) + h
+                let d_idx:  int = base + p
+                z1_h = z1_h + (self.data[d_idx] * self.W1[w1_idx])
+            }
+            self.z1_cache[h] = z1_h
+            let a1_h: float = 0.0
+            if z1_h > 0.0 { a1_h = z1_h }
+            self.a1_cache[h] = a1_h
+        }
+        let z2: float = self.b2[0]
+        for h in 64 {
+            z2 = z2 + (self.a1_cache[h] * self.W2[h])
+        }
+        let neg_z2: float = 0.0 - z2
+        return 1.0 / (1.0 + exp(neg_z2))
+    }
+}
+```
+
+---
+
+### Full Results Summary
+
+| Experiment | Python | Go | C++ | C* | C* vs Python |
+|---|---|---|---|---|---|
+| Logistic Regression | 0.841s | — | — | 0.023s | **37x faster** |
+| Neural Network | 91.419s | 1.061s | 0.916s | 0.944s | **97x faster** |
+
+The speedup grows with the size of the problem. A language built from scratch, with a Python frontend and an LLVM backend, matches the performance of C++ on a real machine learning workload — with none of C++'s complexity.
 
 ---
 
@@ -250,15 +335,14 @@ cd cstar
 # Compile and JIT-execute a .cstar program
 python src/main.py examples/hello.cstar
 
-# Compile the MNIST benchmark
-python src/main.py examples/mnist_project/benchmark_fast.cstar
+# Run the logistic regression benchmark
+python src/main.py mnist_project/LR_mnist.cstar
 
-# To regenerate the MNIST data files first:
-python examples/mnist_project/convert_data.py
-python src/main.py examples/mnist_project/benchmark_fast.cstar
+# Run the neural network benchmark
+python src/main.py mnist_project/nn_mnist.cstar
 ```
 
-The compiler will print each phase as it runs, display the full AST, emit LLVM IR to stdout, JIT-execute the program, and save a native object file to the `obj/` directory (`.obj` on Windows, `.o` on Linux and macOS).
+The compiler prints each phase as it runs, displays the full AST, emits LLVM IR, JIT-executes the program, and saves a native object file to the `obj/` directory (`.obj` on Windows, `.o` on Linux and macOS).
 
 ```
 --- Compiling examples/hello.cstar ---
@@ -267,9 +351,9 @@ The compiler will print each phase as it runs, display the full AST, emit LLVM I
 AST Generated Successfully
 
 --- ABSTRACT SYNTAX TREE (AST) ---
-└── Program
-    └── Print
-        └── Value: StringNode (Hello, World!)
+`-- Program
+    `-- Print
+        `-- Value: StringNode (Hello, World!)
 ----------------------------------
 
 3. Semantic Analysis...
@@ -289,35 +373,35 @@ Every `.cstar` file travels through five phases in order. Each phase has one job
 
 ```
 C* Source Code
-      │
-      ▼
-┌─────────────┐
-│   LEXER     │  Breaks raw text into a flat stream of typed Tokens
-└──────┬──────┘  (keywords, identifiers, operators, literals)
-       │
-       ▼
-┌─────────────┐
-│   PARSER    │  Consumes tokens via recursive descent and builds
-└──────┬──────┘  an Abstract Syntax Tree (AST) of Python objects
-       │
-       ▼
-┌──────────────────┐
-│ SEMANTIC ANALYZER│  Walks the AST: resolves scopes, checks types,
-└──────┬───────────┘  validates function signatures, reports errors
-       │
-       ▼
-┌─────────────────┐
-│  LLVM CODEGEN   │  Traverses the validated AST and emits
-└──────┬──────────┘  LLVM Intermediate Representation (IR)
-       │
-       ▼
-┌─────────────┐
-│  LLVM       │  Applies optimization passes and compiles IR to
-│  BACKEND    │  native x86-64 machine code 
-└─────────────┘
+      |
+      v
++-------------+
+|   LEXER     |  Breaks raw text into a flat stream of typed Tokens
++------+------+  (keywords, identifiers, operators, literals)
+       |
+       v
++-------------+
+|   PARSER    |  Consumes tokens via recursive descent and builds
++------+------+  an Abstract Syntax Tree (AST) of Python objects
+       |
+       v
++------------------+
+| SEMANTIC ANALYZER|  Walks the AST: resolves scopes, checks types,
++------+-----------+  validates function signatures, reports errors
+       |
+       v
++-----------------+
+|  LLVM CODEGEN   |  Traverses the validated AST and emits
++------+----------+  LLVM Intermediate Representation (IR)
+       |
+       v
++-------------+
+|  LLVM       |  Applies optimization passes and compiles IR to
+|  BACKEND    |  native x86-64 machine code
++-------------+
 ```
 
-**The frontend (Lexer → Semantic Analyzer) is written entirely in Python** — fast to develop, readable, and easy to extend. **The backend is LLVM**, accessed through the `llvmlite` Python bindings. We hand LLVM our IR and it applies the same optimization passes used by Clang, Rust, and Swift, then emits machine code for the target architecture.
+**The frontend (Lexer through Semantic Analyzer) is written entirely in Python** — fast to develop, readable, and easy to extend. **The backend is LLVM**, accessed through the `llvmlite` Python bindings. We hand LLVM our IR and it applies the same optimization passes used by Clang, Rust, and Swift, then emits machine code for the target architecture.
 
 The division is intentional: we own the hard part (understanding C* syntax and semantics), and LLVM owns the other hard part (turning it into optimal machine code for every CPU on the planet).
 
@@ -328,27 +412,30 @@ The division is intentional: we own the hard part (understanding C* syntax and s
 ```
 cstar/
 ├── src/
-│   ├── main.py           ← Entry point — wires the full pipeline
-│   ├── lexer.py          ← Tokenizer (hand-written, no regex)
-│   ├── tokens.py         ← TokenType enum + Token class
-│   ├── parser.py         ← Recursive descent parser + all AST nodes
-│   ├── semantic.py       ← Type checker, scope resolution, symbol table
-│   ├── codegen.py        ← LLVM IR generation via llvmlite
-│   ├── visualizer.py     ← ASCII AST printer for debugging
-│   ├── errors.py         ← Compiler error hierarchy
-│   ├── error_list.py     ← Error accumulator
-│   ├── lib_io.c          ← Native C extension for fast CSV loading
-│   └── lib_io.{dll,so,dylib}  ← Built locally (see Makefile.lib_io)
+│   ├── main.py           <- Entry point — wires the full pipeline
+│   ├── lexer.py          <- Tokenizer (hand-written, no regex)
+│   ├── tokens.py         <- TokenType enum + Token class
+│   ├── parser.py         <- Recursive descent parser + all AST nodes
+│   ├── semantic.py       <- Type checker, scope resolution, symbol table
+│   ├── codegen.py        <- LLVM IR generation via llvmlite
+│   ├── visualizer.py     <- ASCII AST printer for debugging
+│   ├── errors.py         <- Compiler error hierarchy
+│   ├── error_list.py     <- Error accumulator
+│   ├── lib_io.c          <- Native C extension for fast CSV loading
+│   └── lib_io.{dll,so,dylib}  <- Built locally (see Makefile.lib_io)
 │
-├── examples/
-│   └── mnist_project/
-│       ├── benchmark_fast.cstar   ← The neural network in C*
-│       ├── train_python.py        ← The identical Python benchmark
-│       ├── convert_data.py        ← Prepares flat CSV data files
-│       └── *.csv                  ← MNIST training/test data
+├── mnist_project/
+│   ├── data/             <- MNIST CSV files and weight initialization files
+│   ├── LR_mnist.cstar    <- Logistic regression in C*
+│   ├── LR_mnist.py       <- Logistic regression in Python
+│   ├── nn_mnist.cstar    <- Neural network in C*
+│   ├── nn_mnist.py       <- Neural network in Python
+│   ├── nn_mnist.cpp      <- Neural network in C++
+│   └── nn_mnist.go       <- Neural network in Go
 │
-├── obj/                  ← Compiled object files (generated at runtime)
-├── Makefile.lib_io       ← Builds lib_io.so / lib_io.dylib (Unix)
+├── examples/             <- Small example .cstar programs
+├── obj/                  <- Compiled object files (generated at runtime)
+├── Makefile.lib_io       <- Builds lib_io.so / lib_io.dylib (Unix)
 ├── COMPILER_ARCHITECTURE.md
 └── README.md
 ```
@@ -367,13 +454,13 @@ It grew into something we're genuinely proud of, so we're releasing it under the
 3. Make your changes and add tests
 4. Open a pull request with a description of what you built
 
-Areas where contributions are especially welcome: a `string` type in codegen, `>=` / `<=` in codegen, a standard library, improved error messages with source highlighting, and further native/FFI polish (e.g. packaging `lib_io` for more targets).
+Areas where contributions are especially welcome: a standard library, improved error messages with source highlighting, and further native/FFI polish (e.g. packaging `lib_io` for more targets).
 
 ---
 
 ## License
 
-MIT © The C* Team. See [LICENSE](LICENSE) for details.
+MIT - The C* Team. See [LICENSE](LICENSE) for details.
 
 ---
 
